@@ -1,143 +1,138 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'components/profile_controller.dart';
+import 'components/profile_model.dart';
+import 'widget/privacy_feedback_sheet.dart';
+import 'widget/privacy_policy_page.dart';
+import 'widget/profile_bank_card.dart';
+import 'widget/profile_bank_edit_sheet.dart';
+import 'widget/profile_header_card.dart';
+import 'widget/profile_menu_section.dart';
+import 'widget/support_page.dart';
 
 class ProfilePage extends StatelessWidget {
-  const ProfilePage({super.key});
+  final VoidCallback? onLoggedOut;
 
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Investor Profile & Compliance',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF0F172A),
-                      ),
-                    ),
-                    Text(
-                      'Manage KYC and institutional bank details',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                    ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text(
-                    'KYC Pending',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF92400E),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const _ReadOnlyField(
-              label: 'Registered Full Name',
-              value: 'Vikramaditya Sharma',
-            ),
-            const SizedBox(height: 12),
-            const _ReadOnlyField(
-              label: 'Investor ID',
-              value: 'EVVAA-INV-88402',
-            ),
-            const SizedBox(height: 12),
-            const _ReadOnlyField(
-              label: 'Email Address',
-              value: 'vikram.sharma@evvaa-investors.in',
-            ),
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {},
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFEF2F2),
-                  foregroundColor: const Color(0xFFB91C1C),
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                icon: const Icon(Icons.logout, size: 16),
-                label: const Text(
-                  'Secure Logout',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
-          ],
-        ),
+  const ProfilePage({super.key, this.onLoggedOut});
+
+  static const Color _bg = Color(0xFFF8FAFC);
+  static const Color _dark = Color(0xFF0F172A);
+
+  ProfileController _resolveController() {
+    if (Get.isRegistered<ProfileController>()) {
+      return Get.find<ProfileController>();
+    }
+    return Get.put(ProfileController());
+  }
+
+  void _openBankSheet(BuildContext context, ProfileController controller) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ProfileBankEditSheet(
+        initialDetails: controller.profile.value.bankDetails,
+        onSave:
+            ({
+              required String accountHolderName,
+              required String accountNumber,
+              required String ifscCode,
+              required String bankName,
+              required String upiId,
+            }) {
+              return controller.updateBankDetails(
+                accountHolderName: accountHolderName,
+                accountNumber: accountNumber,
+                ifscCode: ifscCode,
+                bankName: bankName,
+                upiId: upiId,
+              );
+            },
       ),
     );
   }
-}
 
-class _ReadOnlyField extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ReadOnlyField({required this.label, required this.value});
+  void _openFeedbackSheet(BuildContext context, ProfileController controller) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PrivacyFeedbackSheet(
+        onSubmit: ({required String topic, required String message}) {
+          return controller.submitPrivacyFeedback(
+            topic: topic,
+            message: message,
+          );
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF64748B),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: Text(
-            value,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF0F172A),
+    final ProfileController controller = _resolveController();
+
+    return Scaffold(
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Obx(() {
+          final InvestorProfileModel user = controller.profile.value;
+
+          return RefreshIndicator(
+            onRefresh: controller.loadProfile,
+            color: _dark,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ProfileHeaderCard(profile: user),
+                  const SizedBox(height: 16),
+                  ProfileBankCard(
+                    bankDetails: user.bankDetails,
+                    onEditTap: () => _openBankSheet(context, controller),
+                  ),
+                  const SizedBox(height: 16),
+                  ProfileMenuSection(
+                    onPrivacyPolicyTap: () {
+                      Get.to(
+                        () => PrivacyPolicyPage(
+                          onFeedbackTap: () =>
+                              _openFeedbackSheet(context, controller),
+                        ),
+                      );
+                    },
+                    onPrivacyFeedbackTap: () =>
+                        _openFeedbackSheet(context, controller),
+                    onSupportTap: () {
+                      Get.to(
+                        () => SupportPage(
+                          whatsAppDisplay: controller.supportWhatsAppDisplay,
+                          email: controller.supportEmail,
+                          investorId: user.investorId,
+                          onOpenWhatsApp: controller.openWhatsAppSupport,
+                          onOpenEmail: controller.openEmailSupport,
+                          onCopyWhatsApp: () => controller.copyValue(
+                            controller.supportWhatsAppDisplay,
+                            'WhatsApp number',
+                          ),
+                          onCopyEmail: () => controller.copyValue(
+                            controller.supportEmail,
+                            'Support email',
+                          ),
+                        ),
+                      );
+                    },
+                    onLogoutTap: () =>
+                        controller.logoutSession(onLoggedOut: onLoggedOut),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ),
-      ],
+          );
+        }),
+      ),
     );
   }
 }
