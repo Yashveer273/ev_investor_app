@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../../../../core/theme/app_colors.dart';
+
 import '../widget/portfolio_asset_detail_page.dart';
 import 'portfolio_model.dart';
 
 class PortfolioController extends GetxController {
-  var isLoadingOverview = false.obs;
-  var isLoadingDetail = false.obs;
+  // Loading states
+  final RxBool isLoadingOverview = false.obs;
+  final RxBool isLoadingDetail = false.obs;
 
-  var deployedCapital = const DeployedCapitalSummary(
+  // Portfolio overview
+  final deployedCapital = const DeployedCapitalSummary(
     totalInvested: 0,
     thisMonthInvested: 0,
     totalMonthlyReturn: 0,
@@ -16,9 +18,19 @@ class PortfolioController extends GetxController {
     activeAssetsCount: 0,
   ).obs;
 
-  var overallGraph = const PortfolioGraphData(points: []).obs;
-  var portfolioAssets = <PortfolioAssetItemModel>[].obs;
-  var selectedAssetDetail = Rxn<PortfolioAssetDetailModel>();
+  final overallGraph = const PortfolioGraphData(points: []).obs;
+
+  // Portfolio assets
+  final RxList<PortfolioAssetItemModel> portfolioAssets =
+      <PortfolioAssetItemModel>[].obs;
+
+  // Selected asset detail
+  final Rxn<PortfolioAssetDetailModel> selectedAssetDetail =
+      Rxn<PortfolioAssetDetailModel>();
+
+  // Error states
+  final RxString overviewError = ''.obs;
+  final RxString detailError = ''.obs;
 
   @override
   void onInit() {
@@ -26,127 +38,78 @@ class PortfolioController extends GetxController {
     loadPortfolioOverview();
   }
 
+  // ==========================================
+  // PORTFOLIO OVERVIEW
+  // ==========================================
+
   Future<void> loadPortfolioOverview() async {
     isLoadingOverview.value = true;
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    overviewError.value = '';
 
-    final PortfolioOverviewResponse data =
-        PortfolioOverviewResponse.dummyOverview();
-    deployedCapital.value = data.deployedCapital;
-    overallGraph.value = data.overallGraph;
-    portfolioAssets.assignAll(data.portfolioAssets);
-
-    isLoadingOverview.value = false;
+    try {
+      // Portfolio Overview API will be integrated here.
+      // Update deployedCapital, overallGraph and portfolioAssets
+      // using actual API response.
+    } catch (e) {
+      overviewError.value = e.toString();
+      debugPrint('Portfolio Overview Error: $e');
+    } finally {
+      isLoadingOverview.value = false;
+    }
   }
+
+  // ==========================================
+  // ASSET DETAIL
+  // ==========================================
 
   Future<void> openAssetDetail(PortfolioAssetItemModel asset) async {
     isLoadingDetail.value = true;
-    selectedAssetDetail.value = PortfolioAssetDetailModel.dummyDetailByAsset(
-      asset,
-    );
+    detailError.value = '';
+    selectedAssetDetail.value = null;
+
     Get.to(() => PortfolioAssetDetailPage(assetId: asset.id));
 
-    await Future<void>.delayed(const Duration(milliseconds: 150));
-    selectedAssetDetail.value = PortfolioAssetDetailModel.dummyDetailByAsset(
-      asset,
-    );
-    isLoadingDetail.value = false;
+    try {
+      // Asset Detail API will be integrated here.
+      // Set selectedAssetDetail using actual API response.
+    } catch (e) {
+      detailError.value = e.toString();
+      debugPrint('Portfolio Asset Detail Error: $e');
+    } finally {
+      isLoadingDetail.value = false;
+    }
   }
+
+  // ==========================================
+  // ASSET RENEWAL
+  // ==========================================
 
   Future<void> renewSelectedAsset({
     required int extraMonths,
     required int reinvestAmount,
   }) async {
-    final PortfolioAssetDetailModel? current = selectedAssetDetail.value;
-    if (current == null) return;
-
-    final int newTenure = current.renewal.tenureMonths + extraMonths;
-    final int newRemaining = (newTenure - current.renewal.completedMonths)
-        .clamp(0, newTenure);
-    final int newInvestedAmount =
-        current.assetSummary.investedAmount + reinvestAmount;
-    final int bonus =
-        (current.assetSummary.monthlyReturn *
-            current.renewal.renewalBonusPercent) ~/
-        100;
-    final int extraReturn = reinvestAmount > 0
-        ? (reinvestAmount * 5) ~/ 100
-        : 0;
-    final int newMonthlyReturn =
-        current.assetSummary.monthlyReturn + bonus + extraReturn;
-
-    final PortfolioAssetDetailModel updatedDetail = PortfolioAssetDetailModel(
-      id: current.id,
-      investorId: current.investorId,
-      vehicleId: current.vehicleId,
-      storeId: current.storeId,
-      status: 'Active',
-      units: current.units,
-      assetSummary: AssetSummaryModel(
-        investedAmount: newInvestedAmount,
-        purchaseDate: current.assetSummary.purchaseDate,
-        monthlyReturn: newMonthlyReturn,
-        nextReturnAmount: newMonthlyReturn,
-        nextReturnDate: current.assetSummary.nextReturnDate,
-      ),
-      renewal: AssetRenewalModel(
-        tenureMonths: newTenure,
-        completedMonths: current.renewal.completedMonths,
-        remainingMonths: newRemaining,
-        isRenewable: true,
-        renewalBonusPercent: current.renewal.renewalBonusPercent,
-        renewedDate: '2026-11-20',
-      ),
-      assetGraph: current.assetGraph,
-      productSpecs: current.productSpecs,
+    // Renewal API will be integrated here.
+    // Do not update investment or return values locally.
+    debugPrint(
+      'Renewal API pending: extraMonths=$extraMonths, '
+      'reinvestAmount=$reinvestAmount',
     );
+  }
 
-    selectedAssetDetail.value = updatedDetail;
+  // ==========================================
+  // CLEAR SELECTED ASSET
+  // ==========================================
 
-    final int idx = portfolioAssets.indexWhere((a) => a.id == current.id);
-    if (idx != -1) {
-      final PortfolioAssetItemModel old = portfolioAssets[idx];
-      portfolioAssets[idx] = PortfolioAssetItemModel(
-        id: old.id,
-        investorId: old.investorId,
-        vehicleId: old.vehicleId,
-        storeId: old.storeId,
-        vehicleNoPlate: old.vehicleNoPlate,
-        vehicleModelName: old.vehicleModelName,
-        vehicleYearModel: old.vehicleYearModel,
-        companyName: old.companyName,
-        vehicleImage: old.vehicleImage,
-        clusterCity: old.clusterCity,
-        clusterState: old.clusterState,
-        units: old.units,
-        investedAmount: newInvestedAmount,
-        monthlyReturn: newMonthlyReturn,
-        status: 'Active',
-        isRenewable: true,
-        purchaseDate: old.purchaseDate,
-      );
-      portfolioAssets.refresh();
-    }
+  void clearSelectedAsset() {
+    selectedAssetDetail.value = null;
+    detailError.value = '';
+  }
 
-    final int returnDiff =
-        newMonthlyReturn - current.assetSummary.monthlyReturn;
-    deployedCapital.value = DeployedCapitalSummary(
-      totalInvested: deployedCapital.value.totalInvested + reinvestAmount,
-      thisMonthInvested:
-          deployedCapital.value.thisMonthInvested + reinvestAmount,
-      totalMonthlyReturn: deployedCapital.value.totalMonthlyReturn + returnDiff,
-      thisMonthReturn: deployedCapital.value.thisMonthReturn + returnDiff,
-      activeAssetsCount: deployedCapital.value.activeAssetsCount,
-    );
+  // ==========================================
+  // REFRESH
+  // ==========================================
 
-    Get.snackbar(
-      'Renewed',
-      '${current.productSpecs.vehicleModelName} extended by +$extraMonths months.',
-      snackPosition: SnackPosition.TOP,
-      backgroundColor: AppColors.primary,
-      colorText: AppColors.textInverse,
-      duration: const Duration(seconds: 2),
-      margin: const EdgeInsets.all(12),
-    );
+  Future<void> refreshPortfolio() async {
+    await loadPortfolioOverview();
   }
 }

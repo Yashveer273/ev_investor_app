@@ -21,6 +21,34 @@ class ProfileBankEditSheet extends StatefulWidget {
     required this.onSave,
   });
 
+  static Future<void> show({
+    required BuildContext context,
+    required BankPayoutDetailsModel initialDetails,
+    required Future<bool> Function({
+      required String accountHolderName,
+      required String accountNumber,
+      required String ifscCode,
+      required String bankName,
+      required String upiId,
+    })
+    onSave,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext sheetContext) {
+        return ProfileBankEditSheet(
+          initialDetails: initialDetails,
+          onSave: onSave,
+        );
+      },
+    );
+  }
+
   @override
   State<ProfileBankEditSheet> createState() => _ProfileBankEditSheetState();
 }
@@ -79,13 +107,28 @@ class _ProfileBankEditSheetState extends State<ProfileBankEditSheet> {
   Widget build(BuildContext context) {
     final double bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 18, 20, 24 + bottomInset),
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomInset),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
             Text('Update Bank & Payout Details', style: AppTextStyles.h3),
             const SizedBox(height: 4),
             Text(

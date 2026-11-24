@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../components/app_button.dart';
@@ -118,15 +119,41 @@ class _ProductSpecPageState extends State<ProductSpecPage> {
     );
   }
 
+  // Common placeholder used when API image is missing or fails to load.
+  Widget _imagePlaceholder({
+    required double height,
+    double? width,
+    double iconSize = 48,
+  }) {
+    return Container(
+      height: height,
+      width: width ?? double.infinity,
+      color: AppColors.surfaceMuted,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.electric_scooter_rounded,
+        size: iconSize,
+        color: AppColors.textTertiary,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final HomeController controller = _resolveController();
     final EVProductModel p = widget.product;
+
     final List<VehicleImageItem> gallery = p.angleGallery;
-    final int safeIndex = selectedImageIndex < gallery.length
+    final bool hasImages = gallery.isNotEmpty;
+
+    final int safeIndex =
+        hasImages &&
+            selectedImageIndex >= 0 &&
+            selectedImageIndex < gallery.length
         ? selectedImageIndex
         : 0;
-    final String activeImageUrl = gallery[safeIndex].url;
+
+    final String activeImageUrl = hasImages ? gallery[safeIndex].url : '';
 
     final int totalInvest = p.investmentAmount * units;
     final int totalMonthly = p.investorReturnRate * units;
@@ -164,102 +191,92 @@ class _ProductSpecPageState extends State<ProductSpecPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Main Scooter Image (Crop/Zoom controls removed)
+            // Main Scooter Image
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.network(
-                activeImageUrl,
-                height: 230,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  height: 230,
-                  color: AppColors.surfaceMuted,
-                  alignment: Alignment.center,
-                  child: const Icon(
-                    Icons.electric_scooter_rounded,
-                    size: 48,
-                    color: AppColors.textTertiary,
-                  ),
-                ),
-              ),
+              child: hasImages
+                  ? Image.network(
+                      activeImageUrl,
+                      height: 230,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => _imagePlaceholder(height: 230),
+                    )
+                  : _imagePlaceholder(height: 230),
             ),
 
             const SizedBox(height: 10),
 
-            // Multiple Angle Thumbnails
-            Row(
-              children: List.generate(gallery.length, (index) {
-                final bool isSelected = index == safeIndex;
-                final VehicleImageItem item = gallery[index];
+            // Multiple Angle Thumbnails - only when API images exist
+            if (hasImages)
+              Row(
+                children: List.generate(gallery.length, (index) {
+                  final bool isSelected = index == safeIndex;
+                  final VehicleImageItem item = gallery[index];
 
-                return Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      right: index < gallery.length - 1 ? 8 : 0,
-                    ),
-                    child: GestureDetector(
-                      onTap: () => setState(() => selectedImageIndex = index),
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isSelected
-                                ? AppColors.primary
-                                : AppColors.border,
-                            width: isSelected ? 2 : 1,
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: index < gallery.length - 1 ? 8 : 0,
+                      ),
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() => selectedImageIndex = index);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected
+                                  ? AppColors.primary
+                                  : AppColors.border,
+                              width: isSelected ? 2 : 1,
+                            ),
                           ),
-                        ),
-                        child: Column(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                item.url,
-                                height: 56,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => Container(
+                          child: Column(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  item.url,
                                   height: 56,
-                                  color: AppColors.surfaceMuted,
-                                  alignment: Alignment.center,
-                                  child: const Icon(
-                                    Icons.electric_scooter_rounded,
-                                    size: 22,
-                                    color: AppColors.textTertiary,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => _imagePlaceholder(
+                                    height: 56,
+                                    iconSize: 22,
                                   ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              item.label,
-                              style: AppTextStyles.caption.copyWith(
-                                fontSize: 10,
-                                fontWeight: isSelected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: isSelected
-                                    ? AppColors.textPrimary
-                                    : AppColors.textSecondary,
+                              const SizedBox(height: 4),
+                              Text(
+                                item.label,
+                                style: AppTextStyles.caption.copyWith(
+                                  fontSize: 10,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: isSelected
+                                      ? AppColors.textPrimary
+                                      : AppColors.textSecondary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              }),
-            ),
+                  );
+                }),
+              ),
 
             const SizedBox(height: 16),
 
-            // Cluster Location Card (before Investment Configurator)
+            // Cluster Location Card
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -350,7 +367,9 @@ class _ProductSpecPageState extends State<ProductSpecPage> {
                           children: [
                             IconButton(
                               onPressed: () {
-                                if (units > 1) setState(() => units--);
+                                if (units > 1) {
+                                  setState(() => units--);
+                                }
                               },
                               icon: const Icon(Icons.remove),
                             ),
@@ -390,7 +409,7 @@ class _ProductSpecPageState extends State<ProductSpecPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Compact Row: Add / Added (- button when added) + Invest Now
+                  // Add / Added + Invest Now
                   Obx(() {
                     final int addedCount = controller
                         .getReservedCountForProduct(p.id);

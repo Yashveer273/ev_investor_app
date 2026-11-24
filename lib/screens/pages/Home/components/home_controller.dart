@@ -1,6 +1,9 @@
 import 'dart:async';
+
+import 'package:ev_investors_app/core/services/api_service_evfleet.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+
 import '../../../../core/theme/app_colors.dart';
 import '../widget/product_spec_page.dart';
 import '../widget/reserved_assets_page.dart';
@@ -12,55 +15,193 @@ class HomeController extends GetxController {
 
   static const String allStoreKey = 'ALL';
 
-  var searchQuery = ''.obs;
-  var debouncedQuery = ''.obs;
-  var isSearching = false.obs;
+  // Search
+  final RxString searchQuery = ''.obs;
+  final RxString debouncedQuery = ''.obs;
+  final RxBool isSearching = false.obs;
 
-  var selectedStoreKey = allStoreKey.obs;
-  var selectedStore = Rxn<StoreModel>();
+  // Loading states
+  final RxBool isLoadingStores = false.obs;
+  final RxBool isLoadingProducts = false.obs;
 
-  var nearestStores = <StoreModel>[].obs;
-  var searchStores = <StoreModel>[].obs;
-  var filteredStores = <StoreModel>[].obs;
+  // API errors
+  final RxString storeError = ''.obs;
+  final RxString productError = ''.obs;
 
-  var allProducts = <EVProductModel>[].obs;
-  var filteredProducts = <EVProductModel>[].obs;
-  var visibleProductCount = 6.obs;
+  // Store selection
+  final RxString selectedStoreKey = allStoreKey.obs;
+  final Rxn<StoreModel> selectedStore = Rxn<StoreModel>();
 
-  var reservedAssets = <ReservedAssetItem>[].obs;
+  // Store lists
+  final RxList<StoreModel> nearestStores = <StoreModel>[].obs;
+  final RxList<StoreModel> searchStores = <StoreModel>[].obs;
+  final RxList<StoreModel> filteredStores = <StoreModel>[].obs;
+
+  // Vehicle lists
+  final RxList<EVProductModel> allProducts = <EVProductModel>[].obs;
+  final RxList<EVProductModel> filteredProducts = <EVProductModel>[].obs;
+
+  // Product pagination
+  final RxInt visibleProductCount = 6.obs;
+
+  // Reserved assets
+  final RxList<ReservedAssetItem> reservedAssets = <ReservedAssetItem>[].obs;
 
   Timer? _debounceTimer;
+
   static const Duration debounceDuration = Duration(milliseconds: 500);
 
   @override
   void onInit() {
     super.onInit();
+
     loadAllStoresData();
     loadProductsData();
   }
 
-  void loadAllStoresData() {
-    final StoreResponseModel dummy = StoreResponseModel.dummyData();
-    selectedStoreKey.value = allStoreKey;
-    selectedStore.value = null;
+  // =====================================================
+  // VISIBLE PRODUCTS
+  // =====================================================
 
-    nearestStores.assignAll(dummy.nearestStores);
-    searchStores.assignAll(dummy.searchStores);
-    filteredStores.assignAll(dummy.searchStores);
+  List<EVProductModel> get visibleProducts {
+    if (filteredProducts.length <= visibleProductCount.value) {
+      return filteredProducts.toList();
+    }
+
+    return filteredProducts.take(visibleProductCount.value).toList();
   }
 
-  void loadProductsData() {
-    final List<EVProductModel> items = EVProductModel.dummyProducts();
-    allProducts.assignAll(items);
-    filteredProducts.assignAll(items);
+  bool get hasMoreProducts {
+    return visibleProductCount.value < filteredProducts.length;
   }
 
-  /// Triggered when a store chip is clicked.
-  /// Intended to trigger an API search/fetch around the selected store and
-  /// insert the returned data (rather than client-side filtering).
+  // =====================================================
+  // LOAD STORES FROM CLUSTER API (PORT 5000)
+  // =====================================================
+
+  Future<void> loadAllStoresData() async {
+    isLoadingStores.value = true;
+    storeError.value = '';
+
+    try {
+      final StoreResponseModel response = await ApiServiceEvFleet.getStores();
+
+      nearestStores.assignAll(response.nearestStores);
+      searchStores.assignAll(response.searchStores);
+
+      // Reset selection if selected store no longer exists.
+      if (selectedStore.value != null) {
+        final exists = searchStores.any(
+          (store) => store.id == selectedStore.value!.id,
+        );
+
+        if (!exists) {
+          selectedStore.value = null;
+          selectedStoreKey.value = allStoreKey;
+        }
+      }
+
+      _applyTextSearch(debouncedQuery.value);
+      _applyProductSearchAndStore();
+    } catch (e) {
+      storeError.value = e.toString();
+
+      nearestStores.clear();
+      searchStores.clear();
+      filteredStores.clear();
+
+      selectedStore.value = null;
+      selectedStoreKey.value = allStoreKey;
+
+      _applyProductSearchAndStore();
+    } finally {
+      isLoadingStores.value = false;
+    }
+  }
+
+  // =====================================================
+  // LOAD VEHICLES FROM VEHICLE API (PORT 5003)
+  // =====================================================
+  Future<void> loadProductsData({int page = 1, int limit = 10}) async {
+    isLoadingProducts.value = true;
+    productError.value = '';
+
+    try {
+      final Map<String, dynamic> response = await ApiServiceEvFleet.getVehicles(
+        page: page,
+        limit: limit,
+      );
+
+      if (response['success'] != true) {
+        throw Exception(
+          response['message']?.toString() ?? 'Unable to load vehicles',
+        );
+      }
+
+      dynamic vehicleList = response['data'];
+
+      // Support different API response structures.
+      while (vehicleList is Map) {
+        final Map<String, dynamic> data = Map<String, dynamic>.from(
+          vehicleList,
+        );
+
+        if (data['vehicles'] is List) {
+          vehicleList = data['vehicles'];
+        } else if (data['data'] is List) {
+          vehicleList = data['data'];
+        } else if (data['results'] is List) {
+          vehicleList = data['results'];
+        } else if (data['items'] is List) {
+          vehicleList = data['items'];
+        } else {
+          throw Exception('Vehicle list not found in API response.');
+        }
+      }
+
+      if (vehicleList is! List) {
+        throw Exception('Vehicle list not found in API response.');
+      }
+
+      final List<EVProductModel> products = vehicleList
+          .whereType<Map>()
+          .map(
+            (item) => EVProductModel.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList();
+
+      allProducts.assignAll(products);
+
+      visibleProductCount.value = 6;
+      _applyProductSearchAndStore();
+    } catch (e) {
+      productError.value = e.toString();
+
+      // Keep previously loaded products if refresh fails.
+      if (allProducts.isEmpty) {
+        filteredProducts.clear();
+      }
+    } finally {
+      isLoadingProducts.value = false;
+    }
+  }
+  // =====================================================
+  // REFRESH BOTH APIS
+  // =====================================================
+
+  Future<void> refreshHomeData() async {
+    await Future.wait([loadAllStoresData(), loadProductsData()]);
+  }
+
+  // =====================================================
+  // STORE SELECTION
+  // =====================================================
+
   void onStoreChipSelected(StoreModel? store) {
     if (store == null) {
-      loadAllStoresData();
+      selectedStoreKey.value = allStoreKey;
+      selectedStore.value = null;
+
       _applyProductSearchAndStore();
       return;
     }
@@ -68,27 +209,20 @@ class HomeController extends GetxController {
     selectedStoreKey.value = store.id;
     selectedStore.value = store;
 
-    final StoreResponseModel dummy = StoreResponseModel.dummyData();
-    final List<StoreModel> matched = dummy.searchStores
-        .where(
-          (item) =>
-              item.id == store.id ||
-              item.vehicleClusterLocation.city.toLowerCase() ==
-                  store.vehicleClusterLocation.city.toLowerCase(),
-        )
-        .toList();
-
-    final List<StoreModel> nextStores = matched.isNotEmpty ? matched : [store];
-    searchStores.assignAll(nextStores);
-    filteredStores.assignAll(nextStores);
+    // Do not modify the original API store lists.
     _applyProductSearchAndStore();
   }
+
+  // =====================================================
+  // SEARCH
+  // =====================================================
 
   void onSearchChanged(String value) {
     searchQuery.value = value;
     isSearching.value = true;
 
     _debounceTimer?.cancel();
+
     _debounceTimer = Timer(debounceDuration, () {
       _executeSearch(value.trim());
     });
@@ -96,20 +230,29 @@ class HomeController extends GetxController {
 
   void _executeSearch(String query) {
     debouncedQuery.value = query;
+
     _applyTextSearch(query);
     _applyProductSearchAndStore();
+
     isSearching.value = false;
   }
 
   void clearSearch() {
     _debounceTimer?.cancel();
+
     searchController.clear();
+
     searchQuery.value = '';
     debouncedQuery.value = '';
     isSearching.value = false;
+
     _applyTextSearch('');
     _applyProductSearchAndStore();
   }
+
+  // =====================================================
+  // STORE SEARCH FILTER
+  // =====================================================
 
   void _applyTextSearch(String query) {
     if (query.isEmpty) {
@@ -117,59 +260,112 @@ class HomeController extends GetxController {
       return;
     }
 
-    final String q = query.toLowerCase();
-    final List<StoreModel> results = searchStores.where((store) {
-      return store.vehicleClusterOwnerId.toLowerCase().contains(q) ||
-          store.vehicleClusterLocation.city.toLowerCase().contains(q) ||
-          store.vehicleClusterLocation.state.toLowerCase().contains(q) ||
-          store.vehicleClusterLocation.streetAddress.toLowerCase().contains(
-            q,
-          ) ||
-          store.vehicleClusterLocation.zipCode.toLowerCase().contains(q);
+    final String search = query.toLowerCase();
+
+    final results = searchStores.where((store) {
+      final location = store.vehicleClusterLocation;
+
+      return store.vehicleClusterOwnerId.toLowerCase().contains(search) ||
+          store.id.toLowerCase().contains(search) ||
+          store.vehicleCapacity.toString().contains(search) ||
+          location.city.toLowerCase().contains(search) ||
+          location.state.toLowerCase().contains(search) ||
+          location.zipCode.toLowerCase().contains(search) ||
+          location.streetAddress.toLowerCase().contains(search);
     }).toList();
 
     filteredStores.assignAll(results);
   }
 
+  // =====================================================
+  // VEHICLE SEARCH AND STORE FILTER
+  // =====================================================
+
   void _applyProductSearchAndStore() {
-    final String q = debouncedQuery.value.toLowerCase();
+    final String query = debouncedQuery.value.toLowerCase();
+
     final StoreModel? activeStore = selectedStore.value;
 
-    final List<EVProductModel> results = allProducts.where((item) {
+    final String selectedCity =
+        activeStore?.vehicleClusterLocation.city.toLowerCase() ?? '';
+
+    final String selectedState =
+        activeStore?.vehicleClusterLocation.state.toLowerCase() ?? '';
+
+    final String selectedZip =
+        activeStore?.vehicleClusterLocation.zipCode.toLowerCase() ?? '';
+
+    final results = allProducts.where((item) {
+      // Store filter
       final bool matchesStore =
           activeStore == null ||
-          item.clusterCity.toLowerCase() ==
-              activeStore.vehicleClusterLocation.city.toLowerCase() ||
-          item.purchaseLocation.toLowerCase() ==
-              activeStore.vehicleClusterLocation.city.toLowerCase();
+          item.clusterCity.toLowerCase() == selectedCity ||
+          item.purchaseLocation.toLowerCase() == selectedCity ||
+          (item.clusterState.toLowerCase() == selectedState &&
+              item.clusterZipCode.toLowerCase() == selectedZip);
 
+      // Search filter
       final bool matchesQuery =
-          q.isEmpty ||
-          item.vehicleModelName.toLowerCase().contains(q) ||
-          item.vehicleId.toLowerCase().contains(q) ||
-          item.companyName.toLowerCase().contains(q) ||
-          item.vehicleNoPlate.toLowerCase().contains(q) ||
-          item.clusterCity.toLowerCase().contains(q);
+          query.isEmpty ||
+          item.vehicleModelName.toLowerCase().contains(query) ||
+          item.vehicleId.toLowerCase().contains(query) ||
+          item.companyName.toLowerCase().contains(query) ||
+          item.vehicleNoPlate.toLowerCase().contains(query) ||
+          item.clusterCity.toLowerCase().contains(query) ||
+          item.clusterState.toLowerCase().contains(query) ||
+          item.clusterZipCode.toLowerCase().contains(query) ||
+          item.purchaseLocation.toLowerCase().contains(query);
 
       return matchesStore && matchesQuery;
     }).toList();
 
     filteredProducts.assignAll(results);
+
+    visibleProductCount.value = 6;
   }
 
+  // =====================================================
+  // LOAD MORE PRODUCTS
+  // =====================================================
+
   void loadMoreScooters() {
-    visibleProductCount.value += 3;
+    if (!hasMoreProducts) return;
+
+    final int nextCount = visibleProductCount.value + 3;
+
+    visibleProductCount.value = nextCount > filteredProducts.length
+        ? filteredProducts.length
+        : nextCount;
   }
+
+  // =====================================================
+  // RESERVED ASSETS
+  // =====================================================
 
   int getReservedCountForProduct(String productId) {
     final ReservedAssetItem? found = reservedAssets.firstWhereOrNull(
       (item) => item.product.id == productId,
     );
+
     return found?.units ?? 0;
   }
 
   int get totalReservedUnits {
     return reservedAssets.fold<int>(0, (sum, item) => sum + item.units);
+  }
+
+  int get totalReservedInvestment {
+    return reservedAssets.fold<int>(
+      0,
+      (sum, item) => sum + item.totalInvestment,
+    );
+  }
+
+  int get totalReservedMonthlyReturn {
+    return reservedAssets.fold<int>(
+      0,
+      (sum, item) => sum + item.totalMonthlyReturn,
+    );
   }
 
   void reserveProduct(
@@ -178,6 +374,7 @@ class HomeController extends GetxController {
     bool openCart = false,
   }) {
     if (units < 1) units = 1;
+
     final ReservedAssetItem? existing = reservedAssets.firstWhereOrNull(
       (item) => item.product.id == product.id,
     );
@@ -208,6 +405,7 @@ class HomeController extends GetxController {
     final ReservedAssetItem? existing = reservedAssets.firstWhereOrNull(
       (item) => item.product.id == product.id,
     );
+
     if (existing == null) return;
 
     if (existing.units > 1) {
@@ -232,8 +430,65 @@ class HomeController extends GetxController {
     reservedAssets.removeWhere((item) => item.product.id == productId);
   }
 
-  void openProductSpecs(EVProductModel product) {
-    Get.to(() => ProductSpecPage(product: product));
+  void clearReservedAssets() {
+    reservedAssets.clear();
+  }
+
+  // =====================================================
+  // NAVIGATION
+  // =====================================================
+
+  final RxBool isLoadingProductDetail = false.obs;
+  Future<void> openProductSpecs(EVProductModel product) async {
+    if (isLoadingProductDetail.value) return;
+
+    isLoadingProductDetail.value = true;
+
+    try {
+      final Map<String, dynamic> response =
+          await ApiServiceEvFleet.getVehicleById(product.vehicleId);
+
+      if (response['success'] != true) {
+        throw Exception(
+          response['message']?.toString() ??
+              'Unable to fetch vehicle specifications',
+        );
+      }
+
+      dynamic vehicleData = response['data'];
+
+      // Support direct vehicle object or nested data response.
+      while (vehicleData is Map &&
+          vehicleData['data'] is Map &&
+          vehicleData['_id'] == null &&
+          vehicleData['vehicleId'] == null) {
+        vehicleData = vehicleData['data'];
+      }
+
+      if (vehicleData is! Map) {
+        throw Exception('Invalid vehicle details response');
+      }
+
+      final EVProductModel vehicle = EVProductModel.fromJson(
+        Map<String, dynamic>.from(vehicleData),
+      );
+
+      Get.to(() => ProductSpecPage(product: vehicle));
+    } catch (e) {
+      debugPrint('Product Specification API Error: $e');
+
+      Get.snackbar(
+        'Unable to Load Specifications',
+        e.toString().replaceFirst('Exception: ', ''),
+        snackPosition: SnackPosition.TOP,
+        backgroundColor: AppColors.primary,
+        colorText: AppColors.textInverse,
+        duration: const Duration(seconds: 3),
+        margin: const EdgeInsets.all(12),
+      );
+    } finally {
+      isLoadingProductDetail.value = false;
+    }
   }
 
   void openReservedAssetsPage() {
@@ -245,13 +500,18 @@ class HomeController extends GetxController {
   }
 
   void onFindStoreTap() {
-    // Map screen navigation will be added here next
+    // Add store map navigation here.
   }
+
+  // =====================================================
+  // DISPOSE
+  // =====================================================
 
   @override
   void onClose() {
     _debounceTimer?.cancel();
     searchController.dispose();
+
     super.onClose();
   }
 }

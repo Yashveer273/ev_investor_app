@@ -19,10 +19,12 @@ class ProductCardWidget extends StatelessWidget {
   String _formatInr(int amount) {
     final String str = amount.abs().toString();
     if (str.length <= 3) return '₹$str';
+
     final String lastThree = str.substring(str.length - 3);
     final String rest = str.substring(0, str.length - 3);
     final RegExp reg = RegExp(r'\B(?=(\d{2})+(?!\d))');
     final String formattedRest = rest.replaceAllMapped(reg, (m) => '${m[0]},');
+
     return '₹$formattedRest,$lastThree';
   }
 
@@ -34,9 +36,11 @@ class ProductCardWidget extends StatelessWidget {
       final List<EVProductModel> items = controller.filteredProducts;
       final int limit = controller.visibleProductCount.value;
       final int showingCount = limit < items.length ? limit : items.length;
+
       final List<EVProductModel> visibleItems = items
           .take(showingCount)
           .toList();
+
       final bool hasMore = items.length > showingCount;
 
       return Padding(
@@ -74,6 +78,7 @@ class ProductCardWidget extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 14),
+
             if (visibleItems.isEmpty)
               Container(
                 padding: const EdgeInsets.all(24),
@@ -104,7 +109,6 @@ class ProductCardWidget extends StatelessWidget {
                 },
               ),
 
-            // Load More Scooters button connected to HomeController
             if (items.isNotEmpty) ...[
               const SizedBox(height: 16),
               Center(
@@ -162,8 +166,11 @@ class _SingleProductCardState extends State<_SingleProductCard> {
 
   Future<void> _copyText(String value, String label, String fieldKey) async {
     if (value.trim().isEmpty) return;
+
     await Clipboard.setData(ClipboardData(text: value));
+
     if (!mounted) return;
+
     setState(() => _copiedField = fieldKey);
 
     Get.snackbar(
@@ -177,6 +184,7 @@ class _SingleProductCardState extends State<_SingleProductCard> {
     );
 
     await Future<void>.delayed(const Duration(seconds: 2));
+
     if (mounted && _copiedField == fieldKey) {
       setState(() => _copiedField = null);
     }
@@ -186,11 +194,16 @@ class _SingleProductCardState extends State<_SingleProductCard> {
   Widget build(BuildContext context) {
     final EVProductModel product = widget.product;
     final HomeController controller = widget.controller;
+
     final bool idCopied = _copiedField == 'id';
     final bool plateCopied = _copiedField == 'plate';
 
     return GestureDetector(
-      onTap: () => controller.openProductSpecs(product),
+      onTap: () {
+        if (!controller.isLoadingProductDetail.value) {
+          controller.openProductSpecs(product);
+        }
+      },
       child: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
@@ -219,6 +232,7 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                       ),
                     ),
                   ),
+
                   Positioned(
                     top: 12,
                     left: 12,
@@ -273,6 +287,7 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                       ),
                     ),
                   ),
+
                   Positioned(
                     top: 12,
                     right: 12,
@@ -293,6 +308,7 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                       ),
                     ),
                   ),
+
                   Positioned(
                     bottom: 10,
                     left: 12,
@@ -328,6 +344,7 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                 ],
               ),
             ),
+
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -353,6 +370,7 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                           ),
                         ),
                       ),
+
                       GestureDetector(
                         onTap: () => _copyText(
                           product.vehicleNoPlate.toUpperCase(),
@@ -416,14 +434,18 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 6),
+
                   Text(
                     '${product.vehicleModelName} (${product.vehicleYearModel})',
                     style: AppTextStyles.h3,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+
                   const SizedBox(height: 12),
+
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -454,12 +476,14 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                             ],
                           ),
                         ),
+
                         Container(
                           width: 1,
                           height: 28,
                           color: AppColors.border,
                         ),
                         const SizedBox(width: 8),
+
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -481,12 +505,14 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                             ],
                           ),
                         ),
+
                         Container(
                           width: 1,
                           height: 28,
                           color: AppColors.border,
                         ),
                         const SizedBox(width: 8),
+
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -515,7 +541,9 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                 ],
               ),
             ),
+
             const Divider(height: 1, thickness: 1, color: AppColors.border),
+
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
               child: Row(
@@ -528,10 +556,13 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+
                   const SizedBox(width: 6),
+
                   Obx(() {
                     final int addedCount = controller
                         .getReservedCountForProduct(product.id);
+
                     final bool isAdded = addedCount > 0;
 
                     return Row(
@@ -560,6 +591,7 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                           ),
                           const SizedBox(width: 5),
                         ],
+
                         GestureDetector(
                           onTap: () => controller.reserveProduct(product),
                           child: Container(
@@ -602,37 +634,69 @@ class _SingleProductCardState extends State<_SingleProductCard> {
                       ],
                     );
                   }),
+
                   const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: () => controller.openProductSpecs(product),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 8,
+
+                  // View Specs Button with API Loading Indicator
+                  Obx(() {
+                    final bool isLoading =
+                        controller.isLoadingProductDetail.value;
+
+                    return GestureDetector(
+                      onTap: isLoading
+                          ? null
+                          : () => controller.openProductSpecs(product),
+                      child: Container(
+                        height: 36,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (isLoading) ...[
+                              SizedBox(
+                                height: 15,
+                                width: 15,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    AppColors.textInverse,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 7),
+                              Text(
+                                'Loading...',
+                                style: AppTextStyles.badge.copyWith(
+                                  color: AppColors.textInverse,
+                                ),
+                              ),
+                            ] else ...[
+                              Text(
+                                'View Specs',
+                                style: AppTextStyles.badge.copyWith(
+                                  color: AppColors.textInverse,
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                              const Icon(
+                                Icons.chevron_right,
+                                size: 15,
+                                color: AppColors.textInverse,
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'View Specs',
-                            style: AppTextStyles.badge.copyWith(
-                              color: AppColors.textInverse,
-                            ),
-                          ),
-                          const SizedBox(width: 2),
-                          const Icon(
-                            Icons.chevron_right,
-                            size: 15,
-                            color: AppColors.textInverse,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                    );
+                  }),
                 ],
               ),
             ),

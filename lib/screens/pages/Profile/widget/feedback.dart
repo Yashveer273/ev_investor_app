@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
-class PrivacyFeedbackSheet extends StatefulWidget {
+class Feedback extends StatefulWidget {
   final Future<bool> Function({required String topic, required String message})
   onSubmit;
 
-  const PrivacyFeedbackSheet({super.key, required this.onSubmit});
+  const Feedback({super.key, required this.onSubmit});
 
   @override
-  State<PrivacyFeedbackSheet> createState() => _PrivacyFeedbackSheetState();
+  State<Feedback> createState() => _FeedbackState();
 }
 
-class _PrivacyFeedbackSheetState extends State<PrivacyFeedbackSheet> {
+class _FeedbackState extends State<Feedback> {
   static const Color _dark = Color(0xFF0F172A);
   static const Color _muted = Color(0xFF64748B);
   static const Color _border = Color(0xFFE2E8F0);
@@ -48,7 +48,7 @@ class _PrivacyFeedbackSheetState extends State<PrivacyFeedbackSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Privacy Policy Feedback',
+              'Feedback',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,

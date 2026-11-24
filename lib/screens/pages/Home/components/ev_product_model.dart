@@ -1,8 +1,58 @@
+double _parseDouble(dynamic value) {
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? 0.0;
+  return 0.0;
+}
+
+String _parseString(dynamic value) {
+  return value?.toString() ?? '';
+}
+
 class VehicleImageItem {
   final String label;
   final String url;
 
   const VehicleImageItem({required this.label, required this.url});
+}
+
+class VehicleClusterLocationModel {
+  final double lat;
+  final double long;
+  final String zipCode;
+  final String state;
+  final String city;
+  final String streetAddress;
+
+  const VehicleClusterLocationModel({
+    required this.lat,
+    required this.long,
+    required this.zipCode,
+    required this.state,
+    required this.city,
+    required this.streetAddress,
+  });
+
+  factory VehicleClusterLocationModel.fromJson(Map<String, dynamic> json) {
+    return VehicleClusterLocationModel(
+      lat: _parseDouble(json['lat']),
+      long: _parseDouble(json['long'] ?? json['lng']),
+      zipCode: _parseString(json['zipCode']),
+      state: _parseString(json['state']),
+      city: _parseString(json['city']),
+      streetAddress: _parseString(json['streetAddress']),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'lat': lat,
+      'long': long,
+      'zipCode': zipCode,
+      'state': state,
+      'city': city,
+      'streetAddress': streetAddress,
+    };
+  }
 }
 
 class EVProductModel {
@@ -28,10 +78,15 @@ class EVProductModel {
   final List<String> vehicleImage;
   final String vehicleId;
   final int tenureMonths;
+
+  // Original fields retained for existing UI compatibility.
   final String clusterCity;
   final String clusterState;
   final String clusterZipCode;
   final String clusterStreetAddress;
+
+  // Complete dynamic cluster location object.
+  final VehicleClusterLocationModel? vehicleClusterLocation;
 
   EVProductModel({
     required this.id,
@@ -55,11 +110,12 @@ class EVProductModel {
     required this.topSpeedKmph,
     required this.vehicleImage,
     required this.vehicleId,
-    this.tenureMonths = 36,
-    this.clusterCity = 'Aligarh',
-    this.clusterState = 'Uttar Pradesh',
-    this.clusterZipCode = '202138',
-    this.clusterStreetAddress = 'MOH MALIPURA PAINTH MAIDAN KHAIR, 24',
+    this.tenureMonths = 0,
+    this.clusterCity = '',
+    this.clusterState = '',
+    this.clusterZipCode = '',
+    this.clusterStreetAddress = '',
+    this.vehicleClusterLocation,
   });
 
   int get totalProfit {
@@ -72,31 +128,14 @@ class EVProductModel {
     return ((totalProfit / investmentAmount) * 100).round();
   }
 
-  /// Multiple vehicle image URLs array (guaranteed non-empty with angle fallbacks)
+  // Only API images. No dummy image fallback.
   List<String> get vehicleImages {
-    final List<String> cleaned = vehicleImage
+    return vehicleImage
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
-
-    final List<String> defaults = [
-      'https://5.imimg.com/data5/SELLER/Default/2022/1/LL/EY/AW/21369253/hero-destini-125cc-scooty.jpg',
-      'https://tse2.mm.bing.net/th/id/OIP.2rHyt0irjyVvIe8RMWUEZwHaGW?r=0&pid=Api&h=220&P=0',
-      'https://tse4.mm.bing.net/th/id/OIP._REB424hq76CWXsxtIT7dQHaFL?r=0&pid=Api&h=220&P=0',
-    ];
-
-    if (cleaned.isEmpty) {
-      return defaults;
-    }
-
-    if (cleaned.length == 1) {
-      return [cleaned.first, defaults[1], defaults[2]];
-    }
-
-    return cleaned;
   }
 
-  /// Multiple angle items with labels for thumbnail selection
   List<VehicleImageItem> get angleGallery {
     const List<String> angleNames = [
       'Front / Primary',
@@ -106,214 +145,147 @@ class EVProductModel {
     ];
 
     final List<String> urls = vehicleImages;
+
     return List.generate(urls.length, (index) {
-      final String label = index < angleNames.length
-          ? angleNames[index]
-          : 'Angle ${index + 1}';
-      return VehicleImageItem(label: label, url: urls[index]);
+      return VehicleImageItem(
+        label: index < angleNames.length
+            ? angleNames[index]
+            : 'Angle ${index + 1}',
+        url: urls[index],
+      );
     });
   }
 
-  String get primaryImageUrl => vehicleImages.first;
+  String get primaryImageUrl {
+    return vehicleImages.isNotEmpty ? vehicleImages.first : '';
+  }
 
   factory EVProductModel.fromJson(Map<String, dynamic> json) {
-    final Map<String, dynamic> companyMap = Map<String, dynamic>.from(
-      json['companyData'] ?? {},
-    );
-    final Map<String, dynamic> pricingMap = Map<String, dynamic>.from(
-      json['pricing'] ?? {},
-    );
-    final Map<String, dynamic> locMap = Map<String, dynamic>.from(
-      json['vehicleClusterLocation'] ?? {},
-    );
+    final companyMap = _parseMap(json['companyData']);
+    final pricingMap = _parseMap(json['pricing']);
+    final locationMap = _parseMap(json['vehicleClusterLocation']);
 
-    final List<dynamic> rawImages =
-        json['vehicleImage'] as List<dynamic>? ??
-        json['vehicleImages'] as List<dynamic>? ??
-        [];
+    final VehicleClusterLocationModel? location =
+        json['vehicleClusterLocation'] is Map
+        ? VehicleClusterLocationModel.fromJson(locationMap)
+        : null;
 
-    final List<String> parsedImages = rawImages
-        .map((e) {
-          if (e is String) return e.trim();
-          if (e is Map) {
-            final dynamic candidate =
-                e['url'] ?? e['imageUrl'] ?? e['src'] ?? e['path'];
-            return candidate?.toString().trim() ?? '';
-          }
-          return '';
-        })
-        .where((s) => s.isNotEmpty)
-        .toList();
+    final dynamic rawImages = json['vehicleImage'] ?? json['vehicleImages'];
 
-    final String cityVal =
-        (locMap['city'] ?? companyMap['purchaseLocation'] ?? 'Aligarh')
-            .toString();
+    final List<String> parsedImages = _parseImages(rawImages);
 
     return EVProductModel(
-      id: (json['_id'] ?? json['id'] ?? '').toString(),
-      vehicleType: (json['vehicleType'] ?? '2-Wheeler').toString(),
-      vehicleNoPlate: (json['vehicleNoPlate'] ?? '').toString(),
-      companyName: (companyMap['companyName'] ?? 'EV').toString(),
-      purchaseLocation: (companyMap['purchaseLocation'] ?? cityVal).toString(),
-      sellerName: (companyMap['sellerName'] ?? 'Company Direct').toString(),
-      headquarterLocation: (companyMap['headquarterLocation'] ?? '').toString(),
+      id: _parseString(json['_id'] ?? json['id']),
+      vehicleType: _parseString(json['vehicleType']),
+      vehicleNoPlate: _parseString(json['vehicleNoPlate']),
+
+      companyName: _parseString(companyMap['companyName']),
+      purchaseLocation: _parseString(companyMap['purchaseLocation']),
+      sellerName: _parseString(companyMap['sellerName']),
+      headquarterLocation: _parseString(companyMap['headquarterLocation']),
+
       purchasePrice: _parseInt(pricingMap['purchasePrice']),
       investmentAmount: _parseInt(pricingMap['investmentAmount']),
       investorReturnRate: _parseInt(pricingMap['investorReturnRate']),
       outboundRentalRate: _parseInt(pricingMap['outboundRentalRate']),
-      status: (json['status'] ?? 'Active').toString(),
-      vehicleModelName: (json['vehicleModelName'] ?? '').toString(),
-      vehicleYearModel: _parseInt(json['vehicleYearModel'], fallback: 2026),
+
+      status: _parseString(json['status']),
+      vehicleModelName: _parseString(json['vehicleModelName']),
+      vehicleYearModel: _parseInt(json['vehicleYearModel']),
       vehicleMotorPowerKw: _parseDouble(json['vehicleMotorPowerKw']),
-      vehicleServiceNo: _parseInt(json['vehicleServiceNo'], fallback: 1),
+      vehicleServiceNo: _parseInt(json['vehicleServiceNo']),
       batteryCapacityKwh: _parseDouble(json['batteryCapacityKwh']),
       rangeKm: _parseInt(json['rangeKm']),
       topSpeedKmph: _parseInt(json['topSpeedKmph']),
+
       vehicleImage: parsedImages,
-      vehicleId: (json['vehicleId'] ?? '').toString(),
-      tenureMonths: _parseInt(json['tenureMonths'], fallback: 36),
-      clusterCity: cityVal,
-      clusterState: (locMap['state'] ?? 'Uttar Pradesh').toString(),
-      clusterZipCode: (locMap['zipCode'] ?? '202138').toString(),
-      clusterStreetAddress:
-          (locMap['streetAddress'] ?? 'MOH MALIPURA PAINTH MAIDAN KHAIR, 24')
-              .toString(),
+      vehicleId: _parseString(json['vehicleId']),
+      tenureMonths: _parseInt(json['tenureMonths']),
+
+      // Old fields populated from the new dynamic location object.
+      clusterCity: _parseString(locationMap['city']),
+      clusterState: _parseString(locationMap['state']),
+      clusterZipCode: _parseString(locationMap['zipCode']),
+      clusterStreetAddress: _parseString(locationMap['streetAddress']),
+
+      vehicleClusterLocation: location,
     );
   }
 
-  static List<EVProductModel> dummyProducts() {
-    final List<Map<String, dynamic>> rawList = [
-      {
-        '_id': '6addbadda6574ace355165e4',
-        'vehicleType': '2-Wheeler',
-        'vehicleNoPlate': '2254fg',
-        'companyData': {
-          'companyName': 'xyz',
-          'purchaseLocation': 'noida',
-          'sellerName': 'Company Direct',
-          'headquarterLocation': '',
-        },
-        'pricing': {
-          'purchasePrice': 70000,
-          'investmentAmount': 50000,
-          'investorReturnRate': 2500,
-          'outboundRentalRate': 4000,
-        },
-        'status': 'Active',
-        'vehicleModelName': 'balno',
-        'vehicleYearModel': 2026,
-        'vehicleMotorPowerKw': 6.2,
-        'vehicleServiceNo': 1,
-        'batteryCapacityKwh': 3.7,
-        'rangeKm': 105,
-        'topSpeedKmph': 85,
-        'vehicleImage': [
-          'https://5.imimg.com/data5/SELLER/Default/2022/1/LL/EY/AW/21369253/hero-destini-125cc-scooty.jpg',
-          'https://tse2.mm.bing.net/th/id/OIP.2rHyt0irjyVvIe8RMWUEZwHaGW?r=0&pid=Api&h=220&P=0',
-          'https://tse4.mm.bing.net/th/id/OIP._REB424hq76CWXsxtIT7dQHaFL?r=0&pid=Api&h=220&P=0',
-        ],
-        'vehicleId': 'EV-724EE501',
-        'tenureMonths': 36,
-        'vehicleClusterLocation': {
-          'city': 'Aligarh',
-          'state': 'Uttar Pradesh',
-          'zipCode': '202138',
-          'streetAddress': 'MOH MALIPURA PAINTH MAIDAN KHAIR, 24',
-        },
+  Map<String, dynamic> toJson() {
+    return {
+      '_id': id,
+      'vehicleType': vehicleType,
+      'vehicleNoPlate': vehicleNoPlate,
+      'companyData': {
+        'companyName': companyName,
+        'purchaseLocation': purchaseLocation,
+        'sellerName': sellerName,
+        'headquarterLocation': headquarterLocation,
       },
-      {
-        '_id': '6addbadda6574ace355165e7',
-        'vehicleType': '2-Wheeler',
-        'vehicleNoPlate': '5512ka',
-        'companyData': {
-          'companyName': 'EV Scooters',
-          'purchaseLocation': 'noida',
-          'sellerName': 'Company Direct',
-          'headquarterLocation': '',
-        },
-        'pricing': {
-          'purchasePrice': 130000,
-          'investmentAmount': 45000,
-          'investorReturnRate': 2300,
-          'outboundRentalRate': 3700,
-        },
-        'status': 'Active',
-        'vehicleModelName': 'EV Pro Gen 2',
-        'vehicleYearModel': 2026,
-        'vehicleMotorPowerKw': 11.0,
-        'vehicleServiceNo': 2,
-        'batteryCapacityKwh': 4.0,
-        'rangeKm': 181,
-        'topSpeedKmph': 120,
-        'vehicleImage': [
-          'https://tse2.mm.bing.net/th/id/OIP.2rHyt0irjyVvIe8RMWUEZwHaGW?r=0&pid=Api&h=220&P=0',
-          'https://5.imimg.com/data5/SELLER/Default/2022/1/LL/EY/AW/21369253/hero-destini-125cc-scooty.jpg',
-          'https://tse4.mm.bing.net/th/id/OIP._REB424hq76CWXsxtIT7dQHaFL?r=0&pid=Api&h=220&P=0',
-        ],
-        'vehicleId': 'EV-551BL22',
-        'tenureMonths': 36,
-        'vehicleClusterLocation': {
-          'city': 'Noida',
-          'state': 'Uttar Pradesh',
-          'zipCode': '201301',
-          'streetAddress': 'Sector 62 Institutional Area, Block C',
-        },
+      'pricing': {
+        'purchasePrice': purchasePrice,
+        'investmentAmount': investmentAmount,
+        'investorReturnRate': investorReturnRate,
+        'outboundRentalRate': outboundRentalRate,
       },
-      {
-        '_id': '6addbadda6574ace355165e8',
-        'vehicleType': '2-Wheeler',
-        'vehicleNoPlate': '7734dl',
-        'companyData': {
-          'companyName': 'EV Mobility',
-          'purchaseLocation': 'delhi',
-          'sellerName': 'Direct',
-          'headquarterLocation': '',
-        },
-        'pricing': {
-          'purchasePrice': 145000,
-          'investmentAmount': 55000,
-          'investorReturnRate': 2800,
-          'outboundRentalRate': 4400,
-        },
-        'status': 'Active',
-        'vehicleModelName': 'EV Aero 450X',
-        'vehicleYearModel': 2026,
-        'vehicleMotorPowerKw': 6.4,
-        'vehicleServiceNo': 1,
-        'batteryCapacityKwh': 3.7,
-        'rangeKm': 115,
-        'topSpeedKmph': 90,
-        'vehicleImage': [
-          'https://tse4.mm.bing.net/th/id/OIP._REB424hq76CWXsxtIT7dQHaFL?r=0&pid=Api&h=220&P=0',
-          'https://5.imimg.com/data5/SELLER/Default/2022/1/LL/EY/AW/21369253/hero-destini-125cc-scooty.jpg',
-          'https://tse2.mm.bing.net/th/id/OIP.2rHyt0irjyVvIe8RMWUEZwHaGW?r=0&pid=Api&h=220&P=0',
-        ],
-        'vehicleId': 'EV-884ND99',
-        'tenureMonths': 36,
-        'vehicleClusterLocation': {
-          'city': 'New Delhi',
-          'state': 'Delhi',
-          'zipCode': '110037',
-          'streetAddress': 'Aerocity Hospitality District, Plot 14',
-        },
-      },
-    ];
-
-    return rawList.map(EVProductModel.fromJson).toList();
+      'status': status,
+      'vehicleModelName': vehicleModelName,
+      'vehicleYearModel': vehicleYearModel,
+      'vehicleMotorPowerKw': vehicleMotorPowerKw,
+      'vehicleServiceNo': vehicleServiceNo,
+      'batteryCapacityKwh': batteryCapacityKwh,
+      'rangeKm': rangeKm,
+      'topSpeedKmph': topSpeedKmph,
+      'vehicleImage': vehicleImage,
+      'vehicleId': vehicleId,
+      'tenureMonths': tenureMonths,
+      'vehicleClusterLocation': vehicleClusterLocation?.toJson(),
+    };
   }
 
-  static int _parseInt(dynamic val, {int fallback = 0}) {
-    if (val is int) return val;
-    if (val is double) return val.toInt();
-    if (val is String) return int.tryParse(val) ?? fallback;
-    return fallback;
+  static Map<String, dynamic> _parseMap(dynamic value) {
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return {};
   }
 
-  static double _parseDouble(dynamic val, {double fallback = 0.0}) {
-    if (val is double) return val;
-    if (val is int) return val.toDouble();
-    if (val is String) return double.tryParse(val) ?? fallback;
-    return fallback;
+  static List<String> _parseImages(dynamic value) {
+    if (value is! List) return [];
+
+    return value
+        .map((item) {
+          if (item is String) return item.trim();
+
+          if (item is Map) {
+            final dynamic url =
+                item['url'] ?? item['imageUrl'] ?? item['src'] ?? item['path'];
+
+            return url?.toString().trim() ?? '';
+          }
+
+          return '';
+        })
+        .where((url) => url.isNotEmpty)
+        .toList();
+  }
+
+  static String _parseString(dynamic value) {
+    return value?.toString() ?? '';
+  }
+
+  static int _parseInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+
+  static double _parseDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
   }
 }
 
@@ -324,5 +296,6 @@ class ReservedAssetItem {
   ReservedAssetItem({required this.product, this.units = 1});
 
   int get totalInvestment => product.investmentAmount * units;
+
   int get totalMonthlyReturn => product.investorReturnRate * units;
 }

@@ -37,6 +37,9 @@ dependencies:
   get: ^4.7.3
   get_storage: 
   url_launcher:
+  http: ^1.6.0
+  image_picker: ^1.2.4
+  permission_handler:
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -1,4 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- Android 13 (API 33) और उससे ऊपर के लिए Gallery / Photos परमिशन -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
+    <!-- Android 12 (API 32) और उससे नीचे के लिए Storage परमिशन -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- यदि कैमरा से फ़ोटो खींचने का विकल्प भी है -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <application
         android:label="ev_investors_app"
         android:name="${applicationName}"

@@ -1,26 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
+import '../../../../core/services/api_service.dart';
 import '../../../../routes/app_routes.dart';
 
 class AuthController extends GetxController {
   static const Color _dark = Color(0xFF0F172A);
 
   static const String _keyLoggedIn = 'auth_is_logged_in';
+  static const String _keyInvestorId = 'auth_investor_id';
   static const String _keyPhone = 'auth_phone';
   static const String _keyName = 'auth_full_name';
   static const String _keyEmail = 'auth_email';
 
   final GetStorage _storage = GetStorage();
 
-  var isSubmitting = false.obs;
-  var obscureLoginPassword = true.obs;
-  var obscureRegisterPassword = true.obs;
+  final RxBool isSubmitting = false.obs;
+  final RxBool obscureLoginPassword = true.obs;
+  final RxBool obscureRegisterPassword = true.obs;
 
-  final nameController = TextEditingController();
-  final phoneController = TextEditingController();
-  final emailController = TextEditingController();
-  final passwordController = TextEditingController();
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController phoneController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
 
   @override
   void onClose() {
@@ -34,18 +36,13 @@ class AuthController extends GetxController {
   bool get hasActiveSession {
     final bool loggedIn = _storage.read<bool>(_keyLoggedIn) ?? false;
     final String savedPhone = (_storage.read<String>(_keyPhone) ?? '').trim();
-    return loggedIn && savedPhone.isNotEmpty;
+    final String savedToken = (ApiService.token ?? '').trim();
+    return loggedIn && savedPhone.isNotEmpty && savedToken.isNotEmpty;
   }
 
   /// Removes +91 or leading 91 so plain phone number is stored and sent
   String normalizePhone(String raw) {
-    String clean = raw.replaceAll(RegExp(r'\s+'), '').trim();
-    if (clean.startsWith('+91')) {
-      clean = clean.substring(3);
-    } else if (clean.startsWith('91') && clean.length > 10) {
-      clean = clean.substring(2);
-    }
-    return clean;
+    return ApiService.normalizePhone(raw);
   }
 
   void toggleLoginPasswordVisibility() {
@@ -58,11 +55,15 @@ class AuthController extends GetxController {
 
   Future<void> _persistSession({
     required String phone,
+    String investorId = '',
     String fullName = '',
     String email = '',
   }) async {
     await _storage.write(_keyLoggedIn, true);
     await _storage.write(_keyPhone, phone);
+    if (investorId.isNotEmpty) {
+      await _storage.write(_keyInvestorId, investorId);
+    }
     if (fullName.isNotEmpty) {
       await _storage.write(_keyName, fullName);
     }
@@ -97,19 +98,44 @@ class AuthController extends GetxController {
     }
 
     isSubmitting.value = true;
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    await _persistSession(phone: phone);
-    isSubmitting.value = false;
+    try {
+      final Map<String, dynamic> response = await ApiService.login(
+        phone: phone,
+        password: password,
+      );
+      final Map<String, dynamic> investor = Map<String, dynamic>.from(
+        response['investor'] ?? response['profile'] ?? <String, dynamic>{},
+      );
 
-    passwordController.clear();
-    _notify('Signed in with $phone');
+      final String resolvedPhone = normalizePhone(
+        (investor['phone'] ?? phone).toString(),
+      );
 
-    if (onSuccess != null) {
-      onSuccess();
-    } else {
-      AppRoutes.toEntry();
+      await _persistSession(
+        phone: resolvedPhone,
+        investorId: (investor['investorId'] ?? investor['id'] ?? '').toString(),
+        fullName: (investor['fullName'] ?? investor['name'] ?? '').toString(),
+        email: (investor['email'] ?? '').toString(),
+      );
+
+      passwordController.clear();
+      _notify('Signed in with $resolvedPhone');
+
+      if (onSuccess != null) {
+        onSuccess();
+      } else {
+        AppRoutes.toEntry();
+      }
+      return true;
+    } on ApiException catch (e) {
+      _notify(e.message);
+      return false;
+    } catch (e) {
+      _notify('Unable to login right now');
+      return false;
+    } finally {
+      isSubmitting.value = false;
     }
-    return true;
   }
 
   Future<bool> register({VoidCallback? onSuccess}) async {
@@ -136,18 +162,45 @@ class AuthController extends GetxController {
     }
 
     isSubmitting.value = true;
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    await _persistSession(phone: phone, fullName: name, email: email);
-    isSubmitting.value = false;
+    try {
+      final Map<String, dynamic> response = await ApiService.register(
+        fullName: name,
+        phone: phone,
+        email: email,
+        password: password,
+      );
+      final Map<String, dynamic> investor = Map<String, dynamic>.from(
+        response['investor'] ?? response['profile'] ?? <String, dynamic>{},
+      );
 
-    passwordController.clear();
-    _notify('Registered $name ($phone)');
+      final String resolvedPhone = normalizePhone(
+        (investor['phone'] ?? phone).toString(),
+      );
 
-    if (onSuccess != null) {
-      onSuccess();
-    } else {
-      AppRoutes.toEntry();
+      await _persistSession(
+        phone: resolvedPhone,
+        investorId: (investor['investorId'] ?? investor['id'] ?? '').toString(),
+        fullName: (investor['fullName'] ?? name).toString(),
+        email: (investor['email'] ?? email).toString(),
+      );
+
+      passwordController.clear();
+      _notify('Registered $name ($resolvedPhone)');
+
+      if (onSuccess != null) {
+        onSuccess();
+      } else {
+        AppRoutes.toEntry();
+      }
+      return true;
+    } on ApiException catch (e) {
+      _notify(e.message);
+      return false;
+    } catch (e) {
+      _notify('Unable to register right now');
+      return false;
+    } finally {
+      isSubmitting.value = false;
     }
-    return true;
   }
 }
