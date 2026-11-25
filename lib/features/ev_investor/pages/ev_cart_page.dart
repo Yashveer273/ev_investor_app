@@ -8,6 +8,8 @@ import '../controllers/ev_investor_controller.dart';
 class EvCartPage extends StatefulWidget {
   final EvInvestorController controller;
   final EvCouponController? couponController;
+  final String? investorId;
+  final int tenureMonths;
   final String? phone;
   final void Function(
     int payableAmount,
@@ -20,6 +22,8 @@ class EvCartPage extends StatefulWidget {
     super.key,
     required this.controller,
     this.couponController,
+    this.investorId,
+    this.tenureMonths = 36,
     this.phone,
     this.onRazorpaySlideComplete,
   });
@@ -27,6 +31,8 @@ class EvCartPage extends StatefulWidget {
   static Route<void> route({
     required EvInvestorController controller,
     EvCouponController? couponController,
+    String? investorId,
+    int tenureMonths = 36,
     String? phone,
     void Function(int payableAmount, int discountAmount, String? appliedCoupon)?
     onRazorpaySlideComplete,
@@ -38,6 +44,8 @@ class EvCartPage extends StatefulWidget {
         return EvCartPage(
           controller: controller,
           couponController: couponController,
+          investorId: investorId,
+          tenureMonths: tenureMonths,
           phone: phone,
           onRazorpaySlideComplete: onRazorpaySlideComplete,
         );
@@ -74,6 +82,7 @@ class _EvCartPageState extends State<EvCartPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _couponCtrl.clearCoupon();
       _couponController.clear();
+      widget.controller.resetCheckoutStatus();
     });
   }
 
@@ -101,13 +110,16 @@ class _EvCartPageState extends State<EvCartPage> {
     _couponCtrl.clearCoupon();
   }
 
-  void _handleSwipeCompleted() {
+  Future<void> _handleSwipeCompleted() async {
     final gross = widget.controller.grossCartAmount;
     final discount = _couponCtrl.discountAmountFor(gross);
     final payable = _couponCtrl.payableAmountFor(gross);
     final appliedCode = _couponCtrl.verifiedCoupon.value?.code;
 
-    widget.controller.completeRazorpaySwipeCheckout(
+    await widget.controller.completeRazorpaySwipeCheckout(
+      overridePayableAmount: payable,
+      discountAmount: discount,
+      appliedCoupon: appliedCode,
       onRazorpaySlideComplete: (_, __, ___) {
         _couponCtrl.clearCoupon();
         _couponController.clear();
@@ -158,7 +170,11 @@ class _EvCartPageState extends State<EvCartPage> {
                       ),
                     ),
                     child: InkWell(
-                      onTap: () => Navigator.of(context).pop(),
+                      onTap: () {
+                        if (!widget.controller.isCheckoutLoading.value) {
+                          Navigator.of(context).pop();
+                        }
+                      },
                       customBorder: const CircleBorder(),
                       child: const SizedBox(
                         width: 36,
@@ -212,8 +228,9 @@ class _EvCartPageState extends State<EvCartPage> {
             Expanded(
               child: Obx(() {
                 final items = widget.controller.cartItems;
+                final isLoading = widget.controller.isCheckoutLoading.value;
 
-                if (items.isEmpty) {
+                if (items.isEmpty && !isLoading) {
                   return const _EmptyEvCartState();
                 }
 
@@ -327,8 +344,13 @@ class _EvCartPageState extends State<EvCartPage> {
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           InkWell(
-                                            onTap: () => widget.controller
-                                                .updateCartUnits(ev.id, -1),
+                                            onTap: isLoading
+                                                ? null
+                                                : () => widget.controller
+                                                      .updateCartUnits(
+                                                        ev.id,
+                                                        -1,
+                                                      ),
                                             child: const SizedBox(
                                               width: 26,
                                               height: 26,
@@ -355,8 +377,13 @@ class _EvCartPageState extends State<EvCartPage> {
                                             ),
                                           ),
                                           InkWell(
-                                            onTap: () => widget.controller
-                                                .updateCartUnits(ev.id, 1),
+                                            onTap: isLoading
+                                                ? null
+                                                : () => widget.controller
+                                                      .updateCartUnits(
+                                                        ev.id,
+                                                        1,
+                                                      ),
                                             child: const SizedBox(
                                               width: 26,
                                               height: 26,
@@ -385,21 +412,27 @@ class _EvCartPageState extends State<EvCartPage> {
               }),
             ),
             Obx(() {
+              final isProcessing = widget.controller.isCheckoutLoading.value;
+              final isRewardDone =
+                  widget.controller.swipeCheckoutCompleted.value;
+              final isSuccess = widget.controller.isCheckoutSuccess.value;
+              final errorText = widget.controller.checkoutErrorMessage.value;
+
               if (widget.controller.cartItems.isEmpty &&
-                  !widget.controller.swipeCheckoutCompleted.value) {
+                  !isRewardDone &&
+                  !isProcessing &&
+                  errorText.isEmpty) {
                 return const SizedBox.shrink();
               }
 
               final grossAmount = widget.controller.grossCartAmount;
               final coupon = _couponCtrl.verifiedCoupon.value;
-              final errorText = _couponCtrl.couponErrorMessage.value;
+              final couponError = _couponCtrl.couponErrorMessage.value;
               final isVerifying = _couponCtrl.isVerifyingCoupon.value;
               final totalMonthlyReturn =
                   widget.controller.totalCartMonthlyReturn;
               final discount = _couponCtrl.discountAmountFor(grossAmount);
               final payableAmount = _couponCtrl.payableAmountFor(grossAmount);
-              final isRewardDone =
-                  widget.controller.swipeCheckoutCompleted.value;
 
               return Container(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
@@ -423,8 +456,8 @@ class _EvCartPageState extends State<EvCartPage> {
                       controller: _couponController,
                       appliedCode: coupon?.code,
                       discountAmount: discount > 0 ? discount : null,
-                      errorMessage: errorText,
-                      isLoading: isVerifying,
+                      errorMessage: couponError,
+                      isLoading: isVerifying || isProcessing,
                       onApply: _handleApplyCoupon,
                       onRemove: _handleRemoveCoupon,
                     ),
@@ -494,12 +527,47 @@ class _EvCartPageState extends State<EvCartPage> {
                         ),
                       ],
                     ),
+                    if (!isProcessing && errorText.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF2F2),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFCA5A5)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.error_outline_rounded,
+                              size: 16,
+                              color: Color(0xFFB91C1C),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                errorText,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFB91C1C),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 320),
+                      duration: const Duration(milliseconds: 280),
                       switchInCurve: Curves.easeOutCubic,
                       switchOutCurve: Curves.easeInCubic,
-                      child: isRewardDone
+                      child: (isRewardDone || isSuccess)
                           ? _PremiumRewardBanner(
                               key: const ValueKey('reward_banner'),
                               payableLabel: EvInvestorController.formatINR(
@@ -508,14 +576,22 @@ class _EvCartPageState extends State<EvCartPage> {
                               monthlyLabel:
                                   '+${EvInvestorController.formatINR(totalMonthlyReturn)}/mo',
                             )
-                          : _RazorpaySlideToPayBar(
-                              key: ValueKey(
-                                'rzp_${payableAmount}_${coupon?.code ?? 'none'}',
+                          : Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 310,
+                                ),
+                                child: _RazorpaySlideToPayBar(
+                                  key: ValueKey(
+                                    'rzp_${payableAmount}_${coupon?.code ?? 'none'}',
+                                  ),
+                                  amountLabel: EvInvestorController.formatINR(
+                                    payableAmount,
+                                  ),
+                                  isProcessing: isProcessing,
+                                  onSlideCompleted: _handleSwipeCompleted,
+                                ),
                               ),
-                              amountLabel: EvInvestorController.formatINR(
-                                payableAmount,
-                              ),
-                              onSlideCompleted: _handleSwipeCompleted,
                             ),
                     ),
                   ],
@@ -524,6 +600,186 @@ class _EvCartPageState extends State<EvCartPage> {
             }),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _RazorpaySlideToPayBar extends StatefulWidget {
+  final String amountLabel;
+  final bool isProcessing;
+  final VoidCallback onSlideCompleted;
+
+  const _RazorpaySlideToPayBar({
+    super.key,
+    required this.amountLabel,
+    required this.isProcessing,
+    required this.onSlideCompleted,
+  });
+
+  @override
+  State<_RazorpaySlideToPayBar> createState() => _RazorpaySlideToPayBarState();
+}
+
+class _RazorpaySlideToPayBarState extends State<_RazorpaySlideToPayBar> {
+  double _dragX = 0.0;
+  bool _triggered = false;
+
+  @override
+  void didUpdateWidget(covariant _RazorpaySlideToPayBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.isProcessing && oldWidget.isProcessing) {
+      setState(() {
+        _dragX = 0.0;
+        _triggered = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const double height = 48;
+    const double thumbSize = 40;
+    const double padding = 4;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double maxTravel = math.max(
+          0.0,
+          constraints.maxWidth - thumbSize - (padding * 2),
+        );
+        final double currentX = widget.isProcessing ? maxTravel : _dragX;
+
+        return Container(
+          height: height,
+          width: double.infinity,
+          padding: const EdgeInsets.all(padding),
+          decoration: BoxDecoration(
+            color: const Color(0xFF064E3B),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 48),
+                  child: Text(
+                    widget.isProcessing
+                        ? 'Processing...'
+                        : 'Slide to Pay ${widget.amountLabel}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: currentX,
+                child: GestureDetector(
+                  onHorizontalDragUpdate: widget.isProcessing || _triggered
+                      ? null
+                      : (details) {
+                          setState(() {
+                            _dragX = (_dragX + details.delta.dx).clamp(
+                              0.0,
+                              maxTravel,
+                            );
+                          });
+                        },
+                  onHorizontalDragEnd: widget.isProcessing || _triggered
+                      ? null
+                      : (_) {
+                          if (maxTravel > 0 && _dragX >= maxTravel * 0.78) {
+                            HapticFeedback.mediumImpact();
+                            setState(() {
+                              _dragX = maxTravel;
+                              _triggered = true;
+                            });
+                            widget.onSlideCompleted();
+                          } else {
+                            setState(() {
+                              _dragX = 0.0;
+                            });
+                          }
+                        },
+                  child: Container(
+                    width: thumbSize,
+                    height: thumbSize,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: widget.isProcessing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                                color: Color(0xFF064E3B),
+                              ),
+                            )
+                          : const Icon(
+                              Icons.arrow_forward_rounded,
+                              size: 18,
+                              color: Color(0xFF064E3B),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PremiumRewardBanner extends StatelessWidget {
+  final String payableLabel;
+  final String monthlyLabel;
+
+  const _PremiumRewardBanner({
+    super.key,
+    required this.payableLabel,
+    required this.monthlyLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFECFDF5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF34D399)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.check_circle_rounded,
+            size: 20,
+            color: Color(0xFF059669),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Purchase Successful ($payableLabel) • $monthlyLabel',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF064E3B),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -821,166 +1077,6 @@ class _RefinedCouponCard extends StatelessWidget {
               ],
             ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _RazorpaySlideToPayBar extends StatefulWidget {
-  final String amountLabel;
-  final VoidCallback onSlideCompleted;
-
-  const _RazorpaySlideToPayBar({
-    super.key,
-    required this.amountLabel,
-    required this.onSlideCompleted,
-  });
-
-  @override
-  State<_RazorpaySlideToPayBar> createState() => _RazorpaySlideToPayBarState();
-}
-
-class _RazorpaySlideToPayBarState extends State<_RazorpaySlideToPayBar> {
-  double _dragX = 0.0;
-  bool _completed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const double barHeight = 52.0;
-        const double padding = 4.0;
-        const double thumbSize = barHeight - (padding * 2);
-        final double maxDrag = math.max(
-          0.0,
-          constraints.maxWidth - thumbSize - (padding * 2),
-        );
-        final double currentX = _dragX.clamp(0.0, maxDrag);
-        final double progress = maxDrag > 0 ? (currentX / maxDrag) : 0.0;
-
-        return Container(
-          height: barHeight,
-          width: double.infinity,
-          padding: const EdgeInsets.all(padding),
-          decoration: BoxDecoration(
-            color: const Color(0xFFECFDF5),
-            borderRadius: BorderRadius.circular(barHeight / 2),
-            border: Border.all(color: const Color(0xFF6EE7B7), width: 1.2),
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Center(
-                  child: Opacity(
-                    opacity: (1.0 - (progress * 1.35)).clamp(0.0, 1.0),
-                    child: Text(
-                      'Slide to Pay ${widget.amountLabel}',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF064E3B),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: currentX,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: GestureDetector(
-                    onHorizontalDragUpdate: _completed
-                        ? null
-                        : (details) {
-                            setState(() {
-                              _dragX = (_dragX + details.delta.dx).clamp(
-                                0.0,
-                                maxDrag,
-                              );
-                            });
-                          },
-                    onHorizontalDragEnd: _completed
-                        ? null
-                        : (_) {
-                            if (maxDrag > 0 && currentX >= maxDrag * 0.82) {
-                              setState(() {
-                                _dragX = maxDrag;
-                                _completed = true;
-                              });
-                              HapticFeedback.mediumImpact();
-                              widget.onSlideCompleted();
-                            } else {
-                              setState(() {
-                                _dragX = 0.0;
-                              });
-                            }
-                          },
-                    child: Container(
-                      width: thumbSize,
-                      height: thumbSize,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF064E3B),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Center(
-                        child: Icon(
-                          Icons.arrow_forward_rounded,
-                          size: 18,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _PremiumRewardBanner extends StatelessWidget {
-  final String payableLabel;
-  final String monthlyLabel;
-
-  const _PremiumRewardBanner({
-    super.key,
-    required this.payableLabel,
-    required this.monthlyLabel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFECFDF5),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF34D399), width: 1.2),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.verified_rounded,
-            size: 20,
-            color: Color(0xFF059669),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Asset allocation confirmed ($payableLabel • $monthlyLabel)',
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF064E3B),
-              ),
-            ),
-          ),
         ],
       ),
     );

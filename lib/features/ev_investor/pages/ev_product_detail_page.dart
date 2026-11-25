@@ -186,6 +186,21 @@ class _EvProductDetailPageState extends State<EvProductDetailPage>
     _selectedUnits.value = 1;
   }
 
+  Future<void> _copyProductId() async {
+    final String productId = widget.product.id.trim();
+    if (productId.isEmpty) return;
+
+    await Clipboard.setData(ClipboardData(text: productId));
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Product ID copied'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
   void _openCartPage() {
     Navigator.of(context).push(
       EvCartPage.route(
@@ -614,6 +629,32 @@ class _EvProductDetailPageState extends State<EvProductDetailPage>
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                if (ev.id.trim().isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: SizedBox(
+                                      width: double.infinity,
+                                      child: _DetailSpecBox(
+                                        label: 'Product ID',
+                                        value: ev.id,
+                                        trailing: IconButton(
+                                          onPressed: _copyProductId,
+                                          icon: const Icon(
+                                            Icons.copy_rounded,
+                                            size: 16,
+                                            color: Color(0xFF64748B),
+                                          ),
+                                          visualDensity: VisualDensity.compact,
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                            minWidth: 30,
+                                            minHeight: 30,
+                                          ),
+                                          tooltip: 'Copy Product ID',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 Row(
                                   children: [
                                     Expanded(
@@ -995,8 +1036,13 @@ class _EvProductDetailPageState extends State<EvProductDetailPage>
 class _DetailSpecBox extends StatelessWidget {
   final String label;
   final String value;
+  final Widget? trailing;
 
-  const _DetailSpecBox({required this.label, required this.value});
+  const _DetailSpecBox({
+    required this.label,
+    required this.value,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1007,26 +1053,35 @@ class _DetailSpecBox extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFD1FAE5), width: 1),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF64748B),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF0F172A),
-            ),
-          ),
+          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
         ],
       ),
     );

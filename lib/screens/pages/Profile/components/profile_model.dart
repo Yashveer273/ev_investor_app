@@ -1,3 +1,16 @@
+String _plainProfileId(dynamic value) {
+  if (value is Map) {
+    return _plainProfileId(
+      value[r'$oid'] ??
+          value['_id'] ??
+          value['investorId'] ??
+          value['investor_id'] ??
+          value['id'],
+    );
+  }
+  return (value ?? '').toString().trim();
+}
+
 class KycDetailsModel {
   final String fullNameAsPerPan;
   final String panNumber;
@@ -256,7 +269,9 @@ class InvestorProfileModel {
         : const <String>[];
 
     return InvestorProfileModel(
-      investorId: (json['investorId'] ?? json['id'] ?? '').toString(),
+      investorId: _plainProfileId(
+        json['investorId'] ?? json['investor_id'] ?? json['_id'] ?? json['id'],
+      ),
       fullName: (json['fullName'] ?? json['name'] ?? '').toString(),
       phone: _normalizePhone((json['phone'] ?? '').toString()),
       email: (json['email'] ?? '').toString(),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../components/portfolio_model.dart';
@@ -20,27 +21,55 @@ class PortfolioProductCard extends StatefulWidget {
 }
 
 class _PortfolioProductCardState extends State<PortfolioProductCard> {
-  String? _copiedField;
+  bool _productIdCopied = false;
 
   String _formatInr(int amount) {
     final String str = amount.abs().toString();
+
     if (str.length <= 3) return '₹$str';
+
     final String lastThree = str.substring(str.length - 3);
     final String rest = str.substring(0, str.length - 3);
+
     final RegExp reg = RegExp(r'\B(?=(\d{2})+(?!\d))');
+
     final String formattedRest = rest.replaceAllMapped(reg, (m) => '${m[0]},');
+
     return '₹$formattedRest,$lastThree';
   }
 
-  Future<void> _copy(String value, String label, String key) async {
-    if (value.trim().isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: value));
+  String _unitLabel(int units) {
+    return '$units ${units == 1 ? 'Unit' : 'Units'}';
+  }
+
+  String get _imageUrl {
+    final String coverImage = widget.asset.product.coverImage.trim();
+
+    if (coverImage.isNotEmpty) {
+      return coverImage;
+    }
+
+    if (widget.asset.product.gallery.isNotEmpty) {
+      return widget.asset.product.gallery.first;
+    }
+
+    return '';
+  }
+
+  Future<void> _copyProductId() async {
+    final String id = widget.asset.productId.trim();
+
+    if (id.isEmpty) return;
+
+    await Clipboard.setData(ClipboardData(text: id));
+
     if (!mounted) return;
-    setState(() => _copiedField = key);
+
+    setState(() => _productIdCopied = true);
 
     Get.snackbar(
       'Copied',
-      '$label ($value) copied.',
+      'Product ID copied successfully.',
       snackPosition: SnackPosition.TOP,
       backgroundColor: AppColors.primary,
       colorText: AppColors.textInverse,
@@ -49,16 +78,24 @@ class _PortfolioProductCardState extends State<PortfolioProductCard> {
     );
 
     await Future<void>.delayed(const Duration(seconds: 2));
-    if (mounted && _copiedField == key) {
-      setState(() => _copiedField = null);
+
+    if (mounted) {
+      setState(() => _productIdCopied = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final PortfolioAssetItemModel asset = widget.asset;
-    final bool idCopied = _copiedField == 'id';
-    final bool plateCopied = _copiedField == 'plate';
+    final product = asset.product;
+
+    final String productName = '${product.brand} ${product.modelName}'.trim();
+
+    final String modelYear = product.modelYear > 0
+        ? ' (${product.modelYear})'
+        : '';
+
+    final String imageUrl = _imageUrl;
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -72,77 +109,22 @@ class _PortfolioProductCardState extends State<PortfolioProductCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // PRODUCT IMAGE
             SizedBox(
               height: 175,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.network(
-                    asset.primaryImageUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => Container(
-                      color: AppColors.surfaceMuted,
-                      alignment: Alignment.center,
-                      child: const Icon(
-                        Icons.electric_scooter_rounded,
-                        size: 44,
-                        color: AppColors.textTertiary,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: GestureDetector(
-                      onTap: () => _copy(asset.vehicleId, 'Vehicle ID', 'id'),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface.withValues(alpha: 0.96),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: idCopied
-                                ? AppColors.accentDark
-                                : AppColors.border,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              asset.vehicleId,
-                              style: AppTextStyles.badge.copyWith(
-                                color: AppColors.textPrimary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Icon(
-                              idCopied ? Icons.check : Icons.copy_rounded,
-                              size: 13,
-                              color: idCopied
-                                  ? AppColors.accentDark
-                                  : AppColors.textSecondary,
-                            ),
-                            if (idCopied) ...[
-                              const SizedBox(width: 3),
-                              Text(
-                                'Copied',
-                                style: AppTextStyles.caption.copyWith(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.accentDark,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+                  if (imageUrl.isNotEmpty)
+                    Image.network(
+                      imageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _imagePlaceholder(),
+                    )
+                  else
+                    _imagePlaceholder(),
+
+                  // Asset Status
                   Positioned(
                     top: 12,
                     right: 12,
@@ -163,23 +145,26 @@ class _PortfolioProductCardState extends State<PortfolioProductCard> {
                       ),
                     ),
                   ),
+
+                  // Units
                   Positioned(
                     bottom: 10,
                     left: 12,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
-                        vertical: 4,
+                        vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.88),
+                        color: AppColors.primary.withValues(alpha: 0.90),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        '${asset.clusterCity} • ${asset.units} Unit(s)',
+                        _unitLabel(asset.units),
                         style: AppTextStyles.badge.copyWith(
                           color: AppColors.textInverse,
                           fontSize: 10,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
@@ -187,72 +172,29 @@ class _PortfolioProductCardState extends State<PortfolioProductCard> {
                 ],
               ),
             ),
+
+            // PRODUCT DETAILS
             Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        asset.companyName,
-                        style: AppTextStyles.badge.copyWith(
-                          color: AppColors.accentDark,
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () => _copy(
-                          asset.vehicleNoPlate,
-                          'Plate Number',
-                          'plate',
-                        ),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: plateCopied
-                                ? AppColors.accentLight
-                                : AppColors.background,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: plateCopied
-                                  ? AppColors.accentDark
-                                  : AppColors.border,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Plate: ${asset.vehicleNoPlate}',
-                                style: AppTextStyles.badge.copyWith(
-                                  color: AppColors.textPrimary,
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-                              Icon(
-                                plateCopied ? Icons.check : Icons.copy_rounded,
-                                size: 12,
-                                color: plateCopied
-                                    ? AppColors.accentDark
-                                    : AppColors.textSecondary,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                  Text(
+                    product.brand,
+                    style: AppTextStyles.badge.copyWith(
+                      color: AppColors.accentDark,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '${asset.vehicleModelName} (${asset.vehicleYearModel})',
+                    '$productName$modelYear',
                     style: AppTextStyles.h3,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 10),
+
+                  // Investment and return details
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -271,7 +213,7 @@ class _PortfolioProductCardState extends State<PortfolioProductCard> {
                         ),
                         Container(
                           width: 1,
-                          height: 26,
+                          height: 30,
                           color: AppColors.border,
                         ),
                         const SizedBox(width: 10),
@@ -288,37 +230,99 @@ class _PortfolioProductCardState extends State<PortfolioProductCard> {
                 ],
               ),
             ),
+
             const Divider(height: 1, color: AppColors.border),
+
+            // PRODUCT ID - BELOW IMAGE, WITH ELLIPSIS AND COPY
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '${asset.clusterCity}, ${asset.clusterState}',
-                    style: AppTextStyles.caption,
+                    'Product ID:',
+                    style: AppTextStyles.caption.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
-                  Row(
-                    children: [
-                      Text(
-                        'View Asset',
-                        style: AppTextStyles.badge.copyWith(
-                          color: AppColors.textPrimary,
+                  const SizedBox(width: 6),
+
+                  Expanded(
+                    child: Text(
+                      asset.productId,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  GestureDetector(
+                    onTap: _copyProductId,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _productIdCopied
+                            ? AppColors.accentLight
+                            : AppColors.background,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: _productIdCopied
+                              ? AppColors.accentDark
+                              : AppColors.border,
                         ),
                       ),
-                      const SizedBox(width: 2),
-                      const Icon(
-                        Icons.chevron_right,
-                        size: 16,
-                        color: AppColors.textPrimary,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _productIdCopied ? Icons.check : Icons.copy_rounded,
+                            size: 13,
+                            color: _productIdCopied
+                                ? AppColors.accentDark
+                                : AppColors.textSecondary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _productIdCopied ? 'Copied' : 'Copy',
+                            style: AppTextStyles.caption.copyWith(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: _productIdCopied
+                                  ? AppColors.accentDark
+                                  : AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ],
               ),
             ),
+
+            // VIEW ASSET
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _imagePlaceholder() {
+    return Container(
+      color: AppColors.surfaceMuted,
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.electric_scooter_rounded,
+        size: 44,
+        color: AppColors.textTertiary,
       ),
     );
   }

@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'package:ev_investors_app/core/services/api_service.dart';
 import 'package:ev_investors_app/core/services/api_service_evfleet.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:get_storage/get_storage.dart';
 import '../models/ev_filter_model.dart';
 import '../models/ev_product_model.dart';
 
@@ -12,6 +15,9 @@ class EvCartItem {
 }
 
 class EvInvestorController extends GetxController {
+  static const String _keyInvestorId = 'auth_investor_id';
+  final GetStorage _storage = GetStorage();
+
   // Single product array — updated directly on initial load, category filter, search, or pagination
   final RxList<EvProductModel> allProducts = <EvProductModel>[].obs;
   final RxString activeFilterId = EvFilterModel.defaultFilter.id.obs;
@@ -20,12 +26,32 @@ class EvInvestorController extends GetxController {
   final RxBool isLoadingMore = false.obs;
   final RxInt currentPage = 1.obs;
   final RxBool hasMoreProducts = true.obs;
-  final RxString productsError = ''.obs;
 
+  final RxString productsError = ''.obs;
+  final RxBool isCheckoutLoading = false.obs;
   final RxMap<String, int> cartUnitsMap = <String, int>{}.obs;
   final RxBool swipeCheckoutCompleted = false.obs;
+  final RxBool isCheckoutSuccess = false.obs;
+  final RxString checkoutErrorMessage = ''.obs;
 
   Timer? _debounce;
+
+  String get savedInvestorId {
+    return (_storage.read<String>(_keyInvestorId) ?? '').trim();
+  }
+
+  String resolveInvestorId({String? explicitInvestorId}) {
+    final passed = (explicitInvestorId ?? '').trim();
+    if (passed.isNotEmpty) return passed;
+    return savedInvestorId;
+  }
+
+  void resetCheckoutStatus() {
+    isCheckoutLoading.value = false;
+    swipeCheckoutCompleted.value = false;
+    isCheckoutSuccess.value = false;
+    checkoutErrorMessage.value = '';
+  }
 
   @override
   void onInit() {
@@ -273,24 +299,118 @@ class EvInvestorController extends GetxController {
     cartUnitsMap.clear();
   }
 
+  String _formatDateYMD(DateTime dt) {
+    final y = dt.year.toString().padLeft(4, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
   Future<void> completeRazorpaySwipeCheckout({
+    int? overridePayableAmount,
+    int discountAmount = 0,
+    String? appliedCoupon,
     void Function(int payableAmount, int discountAmount, String? appliedCoupon)?
     onRazorpaySlideComplete,
     required void Function() onNavigateBack,
   }) async {
-    final finalPayable = payableCartAmount;
+    if (isCheckoutLoading.value) return;
 
-    swipeCheckoutCompleted.value = true;
-    await Future.delayed(const Duration(milliseconds: 550));
-
-    clearCartArray();
-
-    if (onRazorpaySlideComplete != null) {
-      onRazorpaySlideComplete(finalPayable, 0, null);
+    if (cartItems.isEmpty) {
+      checkoutErrorMessage.value = 'Please add products to your cart.';
+      isCheckoutSuccess.value = false;
+      Get.snackbar('Cart Empty', 'Please add products to your cart.');
+      return;
     }
 
+    isCheckoutLoading.value = true;
     swipeCheckoutCompleted.value = false;
-    onNavigateBack();
+    isCheckoutSuccess.value = false;
+    checkoutErrorMessage.value = '';
+
+    try {
+      final int finalPayable = overridePayableAmount ?? payableCartAmount;
+
+      final DateTime purchaseDate = DateTime.now();
+
+      // Next reinvestment reminder: 8 months after purchase.
+      final DateTime nextReinvestmentDate = DateTime(
+        purchaseDate.year,
+        purchaseDate.month + 8,
+        purchaseDate.day,
+      );
+
+      // Keep cart unchanged until every API call succeeds.
+      for (final cartItem in cartItems.toList()) {
+        final product = allProducts.firstWhereOrNull(
+          (item) => item.id == cartItem.evId,
+        );
+
+        if (product == null) {
+          throw Exception('Product not found for ID: ${cartItem.evId}');
+        }
+
+        final int productInvestmentAmount = product.totalAmountForUnits(
+          cartItem.units,
+        );
+
+        final int productMonthlyReturn = product.monthlyReturnForUnits(
+          cartItem.units,
+        );
+
+        // Investor ID is automatically read from GetStorage
+        // inside ApiService.buyProductAsset().
+        final response = await ApiService.buyProductAsset(
+          productJson: product.toJson(),
+          investmentAmount: productInvestmentAmount,
+          units: cartItem.units,
+          purchaseDate: _formatDateYMD(purchaseDate),
+          nextReinvestmentDate: _formatDateYMD(nextReinvestmentDate),
+          monthlyReturn: productMonthlyReturn,
+        );
+
+        if (response['success'] == false) {
+          throw Exception(
+            response['message']?.toString() ??
+                'Unable to purchase ${product.name}',
+          );
+        }
+      }
+
+      isCheckoutSuccess.value = true;
+      swipeCheckoutCompleted.value = true;
+
+      await Future.delayed(const Duration(milliseconds: 550));
+
+      clearCartArray();
+
+      onRazorpaySlideComplete?.call(
+        finalPayable,
+        discountAmount,
+        appliedCoupon,
+      );
+
+      swipeCheckoutCompleted.value = false;
+
+      onNavigateBack();
+    } catch (e) {
+      isCheckoutSuccess.value = false;
+      swipeCheckoutCompleted.value = false;
+
+      final errMsg = e.toString().replaceFirst('Exception: ', '');
+      checkoutErrorMessage.value = errMsg;
+
+      Get.snackbar(
+        'Purchase Failed',
+        errMsg,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        duration: const Duration(seconds: 4),
+      );
+    } finally {
+      isCheckoutLoading.value = false;
+    }
   }
 
   static String formatINR(int amount) {

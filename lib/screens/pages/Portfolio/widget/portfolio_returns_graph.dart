@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../components/portfolio_model.dart';
+import 'package:ev_investors_app/screens/pages/Portfolio/components/portfolio_model.dart';
 
 enum PortfolioGraphRange { sixMonths, twelveMonths }
 
@@ -11,12 +12,16 @@ class PortfolioReturnsGraph extends StatefulWidget {
   final String title;
   final String subtitle;
   final PortfolioGraphData graphData;
+  final int selectedMonths;
+  final Future<void> Function(int months)? onRangeChanged;
 
   const PortfolioReturnsGraph({
     super.key,
     required this.title,
     required this.subtitle,
     required this.graphData,
+    this.selectedMonths = 6,
+    this.onRangeChanged,
   });
 
   @override
@@ -25,58 +30,144 @@ class PortfolioReturnsGraph extends StatefulWidget {
 
 class _PortfolioReturnsGraphState extends State<PortfolioReturnsGraph>
     with SingleTickerProviderStateMixin {
-  PortfolioGraphRange _range = PortfolioGraphRange.sixMonths;
   PortfolioGraphMetric _metric = PortfolioGraphMetric.monthlyReturn;
+
   int? _selectedIndex;
+  bool _changingRange = false;
+
+  late PortfolioGraphRange _range;
 
   late final AnimationController _animController;
-  late final Animation<double> _curveProgress;
+  late final Animation<double> _barProgress;
+
+  final ScrollController _scrollController = ScrollController();
+  final ScrollController _monthLabelScrollController = ScrollController();
+
+  static const double _barWidth = 34;
+  static const double _barSpacing = 18;
+  static const double _chartHeight = 165;
 
   @override
   void initState() {
     super.initState();
+
+    _range = widget.selectedMonths == 12
+        ? PortfolioGraphRange.twelveMonths
+        : PortfolioGraphRange.sixMonths;
+
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 650),
     );
-    _curveProgress = CurvedAnimation(
+
+    _barProgress = CurvedAnimation(
       parent: _animController,
       curve: Curves.easeOutCubic,
     );
+
     _animController.forward();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToLatest();
+    });
   }
 
   @override
   void didUpdateWidget(covariant PortfolioReturnsGraph oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.graphData != widget.graphData) {
+
+    if (oldWidget.selectedMonths != widget.selectedMonths) {
+      _range = widget.selectedMonths == 12
+          ? PortfolioGraphRange.twelveMonths
+          : PortfolioGraphRange.sixMonths;
+
+      _selectedIndex = null;
+    }
+
+    if (oldWidget.graphData != widget.graphData ||
+        oldWidget.selectedMonths != widget.selectedMonths) {
       _selectedIndex = null;
       _animController.forward(from: 0);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToLatest();
+      });
     }
   }
 
   @override
   void dispose() {
     _animController.dispose();
+    _scrollController.dispose();
+    _monthLabelScrollController.dispose();
     super.dispose();
   }
 
-  void _changeRange(PortfolioGraphRange next) {
-    if (_range == next) return;
+  void _scrollToLatest() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    if (_monthLabelScrollController.hasClients) {
+      _monthLabelScrollController.animateTo(
+        _monthLabelScrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  Future<void> _changeRange(PortfolioGraphRange next) async {
+    if (_range == next || _changingRange) return;
+
+    final int months = next == PortfolioGraphRange.sixMonths ? 6 : 12;
+
     setState(() {
       _range = next;
       _selectedIndex = null;
+      _changingRange = true;
     });
+
     _animController.forward(from: 0);
+
+    try {
+      await widget.onRangeChanged?.call(months);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _changingRange = false;
+        });
+      }
+    }
+
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToLatest();
+    });
   }
 
   void _changeMetric(PortfolioGraphMetric next) {
     if (_metric == next) return;
+
     setState(() {
       _metric = next;
       _selectedIndex = null;
     });
+
     _animController.forward(from: 0);
+  }
+
+  List<GraphPointModel> get _points {
+    if (_range == PortfolioGraphRange.sixMonths) {
+      return widget.graphData.last6Months;
+    }
+
+    return widget.graphData.last12Months;
   }
 
   int _valueForPoint(GraphPointModel point) {
@@ -97,33 +188,32 @@ class _PortfolioReturnsGraphState extends State<PortfolioReturnsGraph>
     }
   }
 
-  String _formatCompactInr(int amount) {
-    if (amount.abs() >= 100000) {
-      return '₹${(amount / 100000).toStringAsFixed(1)}L';
-    }
-    if (amount.abs() >= 1000) {
-      return '₹${(amount / 1000).toStringAsFixed(1)}k';
-    }
-    return '₹$amount';
-  }
-
   String _formatFullInr(int amount) {
+    final bool isNegative = amount < 0;
     final String str = amount.abs().toString();
-    if (str.length <= 3) return '₹$str';
+
+    if (str.length <= 3) {
+      return '${isNegative ? '-' : ''}₹$str';
+    }
+
     final String lastThree = str.substring(str.length - 3);
     final String rest = str.substring(0, str.length - 3);
+
     final RegExp reg = RegExp(r'\B(?=(\d{2})+(?!\d))');
-    final String formattedRest = rest.replaceAllMapped(reg, (m) => '${m[0]},');
-    return '₹$formattedRest,$lastThree';
+
+    final String formattedRest = rest.replaceAllMapped(
+      reg,
+      (match) => '${match[0]},',
+    );
+
+    return '${isNegative ? '-' : ''}₹$formattedRest,$lastThree';
   }
 
   @override
   Widget build(BuildContext context) {
-    final List<GraphPointModel> points = _range == PortfolioGraphRange.sixMonths
-        ? widget.graphData.last6Months
-        : widget.graphData.last12Months;
-
+    final List<GraphPointModel> points = _points;
     final List<int> values = points.map(_valueForPoint).toList();
+
     final int activeIdx =
         (_selectedIndex != null &&
             _selectedIndex! >= 0 &&
@@ -134,6 +224,7 @@ class _PortfolioReturnsGraphState extends State<PortfolioReturnsGraph>
     final GraphPointModel? activePoint = points.isNotEmpty
         ? points[activeIdx]
         : null;
+
     final int activeValue = activePoint != null
         ? _valueForPoint(activePoint)
         : 0;
@@ -165,7 +256,14 @@ class _PortfolioReturnsGraphState extends State<PortfolioReturnsGraph>
               _rangeToggle(),
             ],
           ),
+
+          if (_changingRange) ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(minHeight: 2),
+          ],
+
           const SizedBox(height: 12),
+
           Row(
             children: [
               _metricChip(
@@ -181,6 +279,7 @@ class _PortfolioReturnsGraphState extends State<PortfolioReturnsGraph>
               ),
             ],
           ),
+
           if (activePoint != null) ...[
             const SizedBox(height: 12),
             Container(
@@ -193,122 +292,190 @@ class _PortfolioReturnsGraphState extends State<PortfolioReturnsGraph>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Date: ${activePoint.date}',
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: Text(
+                      'Date: ${activePoint.monthYearLabel}',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                  Text(
-                    '${_metricLabel()}: ${_formatFullInr(activeValue)}',
-                    style: AppTextStyles.badge.copyWith(
-                      color: AppColors.accentDark,
-                      fontWeight: FontWeight.w700,
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      '${_metricLabel()}: ${_formatFullInr(activeValue)}',
+                      textAlign: TextAlign.end,
+                      style: AppTextStyles.badge.copyWith(
+                        color: AppColors.accentDark,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ],
+
           const SizedBox(height: 14),
-          if (points.length < 2)
+
+          if (points.isEmpty)
             SizedBox(
-              height: 165,
+              height: _chartHeight,
               child: Center(
                 child: Text(
-                  'Not enough date points for graph.',
+                  'No investment records available.',
                   style: AppTextStyles.caption,
                 ),
               ),
             )
           else
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final double width = constraints.maxWidth;
-                const double height = 165;
-                return GestureDetector(
-                  onTapDown: (details) {
-                    final double step = width / (points.length - 1);
-                    final int idx = (details.localPosition.dx / step)
-                        .round()
-                        .clamp(0, points.length - 1);
-                    setState(() => _selectedIndex = idx);
-                  },
-                  child: AnimatedBuilder(
-                    animation: _curveProgress,
-                    builder: (context, _) {
-                      return CustomPaint(
-                        size: Size(width, height),
-                        painter: _SmoothCurveAreaPainter(
-                          values: values,
-                          progress: _curveProgress.value,
-                          selectedIndex: activeIdx,
-                          lineColor: AppColors.accentDark,
-                          strokeColor: AppColors.primary,
-                          areaTopColor: AppColors.accent.withValues(
-                            alpha: 0.28,
-                          ),
-                          areaBottomColor: AppColors.accent.withValues(
-                            alpha: 0.02,
-                          ),
-                          gridColor: AppColors.border,
-                        ),
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
+            _buildScrollableBarChart(points, values, activeIdx),
+
           if (points.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(points.length, (index) {
-                final bool showLabel =
-                    points.length <= 6 ||
-                    index == 0 ||
-                    index == points.length - 1 ||
-                    index % 2 == 0;
-                final bool isSelected = index == activeIdx;
-                return Expanded(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _selectedIndex = index),
-                    child: Text(
-                      showLabel ? points[index].shortMonthLabel : '',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.caption.copyWith(
-                        fontSize: 10,
-                        fontWeight: isSelected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: isSelected
-                            ? AppColors.textPrimary
-                            : AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Min: ${_formatCompactInr(values.reduce((a, b) => a < b ? a : b))}',
-                  style: AppTextStyles.caption.copyWith(fontSize: 10),
-                ),
-                Text(
-                  'Max: ${_formatCompactInr(values.reduce((a, b) => a > b ? a : b))}',
-                  style: AppTextStyles.caption.copyWith(fontSize: 10),
-                ),
-              ],
-            ),
+            _buildMonthLabels(points, activeIdx),
           ],
         ],
       ),
     );
+  }
+
+  Widget _buildScrollableBarChart(
+    List<GraphPointModel> points,
+    List<int> values,
+    int activeIdx,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double viewportWidth = constraints.maxWidth;
+
+        final double contentWidth = points.length * (_barWidth + _barSpacing);
+
+        final double chartWidth = contentWidth > viewportWidth
+            ? contentWidth
+            : viewportWidth;
+
+        return SingleChildScrollView(
+          controller: _scrollController,
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) {
+              final double itemWidth = _barWidth + _barSpacing;
+
+              final int index = (details.localPosition.dx / itemWidth)
+                  .floor()
+                  .clamp(0, points.length - 1);
+
+              setState(() {
+                _selectedIndex = index;
+              });
+
+              _scrollLabelsToIndex(index);
+            },
+            child: AnimatedBuilder(
+              animation: _barProgress,
+              builder: (context, child) {
+                return CustomPaint(
+                  size: Size(chartWidth, _chartHeight),
+                  painter: _MonthlyBarChartPainter(
+                    values: values,
+                    progress: _barProgress.value,
+                    selectedIndex: activeIdx,
+                    currentMonthIndex: points.length - 1,
+                    barWidth: _barWidth,
+                    barSpacing: _barSpacing,
+                    primaryColor: AppColors.primary,
+                    highlightColor: AppColors.accentDark,
+                    gridColor: AppColors.border,
+                    selectedColor: AppColors.accent,
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMonthLabels(List<GraphPointModel> points, int activeIdx) {
+    return SingleChildScrollView(
+      controller: _monthLabelScrollController,
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        children: List.generate(points.length, (index) {
+          final bool isCurrentMonth = index == points.length - 1;
+          final bool isSelected = index == activeIdx;
+
+          return SizedBox(
+            width: _barWidth + _barSpacing,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                setState(() {
+                  _selectedIndex = index;
+                });
+
+                _scrollToIndex(index);
+              },
+              child: Text(
+                points[index].shortMonthLabel,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.caption.copyWith(
+                  fontSize: 10,
+                  fontWeight: isSelected || isCurrentMonth
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                  color: isCurrentMonth
+                      ? AppColors.accentDark
+                      : isSelected
+                      ? AppColors.textPrimary
+                      : AppColors.textSecondary,
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  void _scrollLabelsToIndex(int index) {
+    if (!_monthLabelScrollController.hasClients) return;
+
+    final double offset = index * (_barWidth + _barSpacing);
+
+    final double target = offset
+        .clamp(0.0, _monthLabelScrollController.position.maxScrollExtent)
+        .toDouble();
+
+    _monthLabelScrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _scrollToIndex(int index) {
+    if (!_scrollController.hasClients) return;
+
+    final double offset = index * (_barWidth + _barSpacing);
+
+    final double target = offset
+        .clamp(0.0, _scrollController.position.maxScrollExtent)
+        .toDouble();
+
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+
+    _scrollLabelsToIndex(index);
   }
 
   Widget _rangeToggle() {
@@ -392,110 +559,105 @@ class _PortfolioReturnsGraphState extends State<PortfolioReturnsGraph>
   }
 }
 
-class _SmoothCurveAreaPainter extends CustomPainter {
+class _MonthlyBarChartPainter extends CustomPainter {
   final List<int> values;
   final double progress;
   final int selectedIndex;
-  final Color lineColor;
-  final Color strokeColor;
-  final Color areaTopColor;
-  final Color areaBottomColor;
-  final Color gridColor;
+  final int currentMonthIndex;
 
-  _SmoothCurveAreaPainter({
+  final double barWidth;
+  final double barSpacing;
+
+  final Color primaryColor;
+  final Color highlightColor;
+  final Color gridColor;
+  final Color selectedColor;
+
+  _MonthlyBarChartPainter({
     required this.values,
     required this.progress,
     required this.selectedIndex,
-    required this.lineColor,
-    required this.strokeColor,
-    required this.areaTopColor,
-    required this.areaBottomColor,
+    required this.currentMonthIndex,
+    required this.barWidth,
+    required this.barSpacing,
+    required this.primaryColor,
+    required this.highlightColor,
     required this.gridColor,
+    required this.selectedColor,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
+    if (values.isEmpty) return;
 
-    final int minVal = values.reduce((a, b) => a < b ? a : b);
-    final int maxVal = values.reduce((a, b) => a > b ? a : b);
-    final double range = (maxVal - minVal) == 0
-        ? (maxVal == 0 ? 1.0 : maxVal.toDouble())
-        : (maxVal - minVal).toDouble();
+    const double topPadding = 12;
+    const double bottomPadding = 12;
 
-    const double topPad = 14;
-    const double bottomPad = 14;
-    final double usableHeight = size.height - topPad - bottomPad;
+    final double usableHeight = size.height - topPadding - bottomPadding;
+
+    final int maxValue = values.reduce((a, b) => a > b ? a : b);
+
+    final double scaleMax = maxValue <= 0 ? 1 : maxValue.toDouble();
 
     final Paint gridPaint = Paint()
-      ..color = gridColor.withValues(alpha: 0.6)
+      ..color = gridColor.withValues(alpha: 0.65)
       ..strokeWidth = 1;
-    for (int i = 0; i <= 2; i++) {
-      final double y = topPad + (usableHeight * (i / 2));
+
+    for (int i = 0; i <= 3; i++) {
+      final double y = topPadding + usableHeight * (i / 3);
+
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
 
-    final List<Offset> allPoints = List.generate(values.length, (i) {
-      final double x = (size.width * i) / (values.length - 1);
-      final double norm = (values[i] - minVal) / range;
-      final double targetY = topPad + usableHeight * (1 - norm);
-      final double y =
-          topPad +
-          usableHeight -
-          ((topPad + usableHeight - targetY) * progress);
-      return Offset(x, y);
-    });
+    final double itemWidth = barWidth + barSpacing;
 
-    final Path curvePath = _buildSmoothPath(allPoints);
+    for (int i = 0; i < values.length; i++) {
+      final double x = i * itemWidth + (barSpacing / 2);
 
-    final Path areaPath = Path.from(curvePath)
-      ..lineTo(allPoints.last.dx, size.height - bottomPad)
-      ..lineTo(allPoints.first.dx, size.height - bottomPad)
-      ..close();
+      final double rawHeight = (values[i] / scaleMax) * usableHeight;
 
-    final Paint areaPaint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [areaTopColor, areaBottomColor],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    canvas.drawPath(areaPath, areaPaint);
+      final double barHeight = rawHeight * progress;
 
-    final Paint linePaint = Paint()
-      ..color = lineColor
-      ..strokeWidth = 2.6
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    canvas.drawPath(curvePath, linePaint);
+      final double visibleHeight = values[i] > 0 ? barHeight : 2;
 
-    for (int i = 0; i < allPoints.length; i++) {
+      final double top = size.height - bottomPadding - visibleHeight;
+
+      final Rect barRect = Rect.fromLTWH(x, top, barWidth, visibleHeight);
+
+      final bool isCurrentMonth = i == currentMonthIndex;
+
       final bool isSelected = i == selectedIndex;
-      canvas.drawCircle(
-        allPoints[i],
-        isSelected ? 5.5 : 3.2,
-        Paint()..color = isSelected ? strokeColor : lineColor,
+
+      final Color barColor = isCurrentMonth ? highlightColor : primaryColor;
+
+      final Paint barPaint = Paint()
+        ..color = barColor
+        ..style = PaintingStyle.fill;
+
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(barRect, const Radius.circular(6)),
+        barPaint,
       );
+
       if (isSelected) {
-        canvas.drawCircle(allPoints[i], 2.3, Paint()..color = Colors.white);
+        final Paint selectedPaint = Paint()
+          ..color = selectedColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2;
+
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(barRect.inflate(2), const Radius.circular(7)),
+          selectedPaint,
+        );
       }
     }
   }
 
-  Path _buildSmoothPath(List<Offset> pts) {
-    final Path path = Path()..moveTo(pts.first.dx, pts.first.dy);
-    for (int i = 0; i < pts.length - 1; i++) {
-      final Offset p0 = pts[i];
-      final Offset p1 = pts[i + 1];
-      final double midX = (p0.dx + p1.dx) / 2;
-      path.cubicTo(midX, p0.dy, midX, p1.dy, p1.dx, p1.dy);
-    }
-    return path;
-  }
-
   @override
-  bool shouldRepaint(covariant _SmoothCurveAreaPainter oldDelegate) {
+  bool shouldRepaint(covariant _MonthlyBarChartPainter oldDelegate) {
     return oldDelegate.values != values ||
         oldDelegate.progress != progress ||
-        oldDelegate.selectedIndex != selectedIndex;
+        oldDelegate.selectedIndex != selectedIndex ||
+        oldDelegate.currentMonthIndex != currentMonthIndex;
   }
 }
